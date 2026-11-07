@@ -30,7 +30,7 @@ export const env = {
   // Google OAuth
   GOOGLE_CLIENT_ID: requireEnv('GOOGLE_CLIENT_ID'),
   GOOGLE_CLIENT_SECRET: requireEnv('GOOGLE_CLIENT_SECRET'),
-  GOOGLE_REDIRECT_URI: optional('GOOGLE_REDIRECT_URI', 'https://lifepilot-ai-backend-supk.onrender.com/api/auth/google/callback'),
+  GOOGLE_REDIRECT_URI: optional('GOOGLE_REDIRECT_URI', 'https://lifepilot-ai-backend-uwp4.onrender.com/api/auth/google/callback'),
   GOOGLE_ANDROID_CLIENT_ID: optional('GOOGLE_ANDROID_CLIENT_ID', '262381768373-u9n98t1f3ct48jiaflaj17ek45fpjm1g.apps.googleusercontent.com'),
 
   // OpenAI
