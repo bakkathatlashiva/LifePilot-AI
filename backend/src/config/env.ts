@@ -30,11 +30,11 @@ export const env = {
   // Google OAuth
   GOOGLE_CLIENT_ID: requireEnv('GOOGLE_CLIENT_ID'),
   GOOGLE_CLIENT_SECRET: requireEnv('GOOGLE_CLIENT_SECRET'),
-  GOOGLE_REDIRECT_URI: optional('GOOGLE_REDIRECT_URI', 'http://localhost:3001/api/auth/google/callback'),
+  GOOGLE_REDIRECT_URI: optional('GOOGLE_REDIRECT_URI', 'https://lifepilot-ai-backend-supk.onrender.com/api/auth/google/callback'),
   GOOGLE_ANDROID_CLIENT_ID: optional('GOOGLE_ANDROID_CLIENT_ID', '262381768373-u9n98t1f3ct48jiaflaj17ek45fpjm1g.apps.googleusercontent.com'),
 
   // OpenAI
-  OPENAI_API_KEY: requireEnv('OPENAI_API_KEY'),
+  OPENAI_API_KEY: optional('OPENAI_API_KEY', 'sk-placeholder'),
   OPENAI_MODEL: optional('OPENAI_MODEL', 'gpt-4o-mini'),
 
   // Valkey / In-Memory Store

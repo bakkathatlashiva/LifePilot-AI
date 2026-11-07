@@ -23,3 +23,4 @@ web-build/
 
 # Do NOT ignore google-services.json for EAS cloud builds
 !google-services.json
+
