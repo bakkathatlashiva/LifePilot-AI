@@ -4,6 +4,7 @@ import {
   RefreshControl, ActivityIndicator, StatusBar
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import { format } from 'date-fns';
@@ -27,6 +28,7 @@ interface Stats {
 
 export function DashboardScreen() {
   const { user } = useAuthStore();
+  const navigation = useNavigation<any>();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [briefing, setBriefing] = useState('');
@@ -127,6 +129,24 @@ export function DashboardScreen() {
           </View>
         )}
 
+        {/* SIM SMS Gateway Banner */}
+        <TouchableOpacity
+          style={styles.gatewayBanner}
+          onPress={() => navigation.navigate('SMSGateway')}
+          activeOpacity={0.85}
+        >
+          <View style={styles.gatewayBannerLeft}>
+            <View style={styles.gatewayIconBox}>
+              <Text style={{ fontSize: 18 }}>📶</Text>
+            </View>
+            <View>
+              <Text style={styles.gatewayBannerTitle}>Personal SIM SMS Gateway</Text>
+              <Text style={styles.gatewayBannerSubtitle}>Dispatch SMS reminders via phone SIM</Text>
+            </View>
+          </View>
+          <Text style={styles.gatewayBannerArrow}>→</Text>
+        </TouchableOpacity>
+
         {/* AI Briefing */}
         {briefing ? (
           <View style={styles.briefingCard}>
@@ -214,4 +234,26 @@ const styles = StyleSheet.create({
   emptyCard: { backgroundColor: '#1e293b', borderRadius: 14, padding: 24, alignItems: 'center' },
   emptyText: { fontSize: 14, color: '#64748b' },
   briefingText: { fontSize: 13, color: '#a5b4fc', lineHeight: 20 },
+  gatewayBanner: {
+    backgroundColor: '#1e293b',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#7c3aed40',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  gatewayBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  gatewayIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#7c3aed20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gatewayBannerTitle: { fontSize: 14, fontWeight: '700', color: '#ffffff' },
+  gatewayBannerSubtitle: { fontSize: 12, color: '#94a3b8', marginTop: 1 },
+  gatewayBannerArrow: { fontSize: 18, color: '#a78bfa', fontWeight: '700' },
 });

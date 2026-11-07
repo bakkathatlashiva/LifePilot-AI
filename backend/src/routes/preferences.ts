@@ -26,6 +26,7 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       'phoneCallsEnabled', 'phoneNumber', 'preferredCallTime',
       'callCategories', 'erpMonitoringEnabled', 'gmailSyncEnabled',
       'gmailSyncInterval', 'defaultReminderTimes',
+      'emailNotificationsEnabled', 'emailCategories', 'emailMinPriority',
     ];
 
     const data = Object.fromEntries(

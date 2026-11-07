@@ -3,6 +3,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { prisma } from '../config/database';
 import { sendSuccess, sendError, sendPaginated } from '../utils/apiResponse';
 import { env } from '../config/env';
+import { sendTestEmailNotification } from '../services/notifications/gmailNotificationService';
 import webpush from 'web-push';
 
 const router = Router();
@@ -126,6 +127,61 @@ router.post('/read-all', async (req: AuthRequest, res: Response) => {
     return sendSuccess(res, null, 'All notifications marked as read');
   } catch (error) {
     return sendError(res, 'Failed to mark notifications as read');
+  }
+});
+
+// Send test Gmail notification
+router.post('/test-email', async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await sendTestEmailNotification(req.user!.userId);
+    if (!result.success) {
+      return sendError(res, result.error || 'Failed to send test email', 400);
+    }
+    return sendSuccess(res, result, `Test notification successfully sent to ${result.recipientEmail}`);
+  } catch (error: any) {
+    return sendError(res, error.message || 'Failed to send test email', 500);
+  }
+});
+
+// Check Gmail notification status & permissions
+router.get('/gmail-status', async (req: AuthRequest, res: Response) => {
+  try {
+    const account = await prisma.connectedAccount.findFirst({
+      where: {
+        userId: req.user!.userId,
+        provider: { in: ['google_gmail', 'google_auth'] },
+        isActive: true,
+      },
+      select: {
+        provider: true,
+        isActive: true,
+        scope: true,
+        tokenExpiry: true,
+        updatedAt: true,
+      },
+    });
+
+    const prefs = await prisma.userPreference.findUnique({
+      where: { userId: req.user!.userId },
+      select: {
+        emailNotificationsEnabled: true,
+        emailCategories: true,
+        emailMinPriority: true,
+      },
+    });
+
+    const isConnected = !!account;
+    const hasSendScope = !!account?.scope?.includes('gmail.send');
+
+    return sendSuccess(res, {
+      isConnected,
+      hasSendScope,
+      account,
+      preferences: prefs,
+      authUrl: '/api/auth/google/gmail',
+    });
+  } catch (error: any) {
+    return sendError(res, 'Failed to fetch Gmail notification status', 500);
   }
 });
 

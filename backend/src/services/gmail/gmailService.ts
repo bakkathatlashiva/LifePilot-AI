@@ -36,9 +36,9 @@ export async function syncGmail(userId: string): Promise<void> {
     const auth = getAuthClient(accessToken, refreshToken);
     const gmail = google.gmail({ version: 'v1', auth });
 
-    // Get messages from last 24 hours that are not yet fetched
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const query = `after:${Math.floor(cutoff.getTime() / 1000)} in:inbox`;
+    // Get messages from last 7 days that are not yet fetched
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const query = `after:${Math.floor(cutoff.getTime() / 1000)}`;
 
     const listRes = await gmail.users.messages.list({
       userId: 'me',

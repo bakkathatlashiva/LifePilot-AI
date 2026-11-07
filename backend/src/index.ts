@@ -23,6 +23,7 @@ import notificationRoutes from './routes/notifications';
 import telegramRoutes from './routes/telegram';
 import examRoutes from './routes/exams';
 import preferenceRoutes from './routes/preferences';
+import smsRoutes from './routes/sms';
 
 import { startWorkers, startCronJobs } from './jobs/scheduler';
 import { valkeyCache } from './config/valkey';
@@ -33,19 +34,36 @@ const app = express();
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
   origin: (origin, callback) => {
+    // Allow non-browser clients (e.g. mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+
     const allowed = [
       env.FRONTEND_URL,
       'http://localhost:5173',
       'http://localhost:3000',
-      'exp://localhost:8081', // Expo dev
+      'http://10.10.6.137:5173',
+      'http://10.10.6.137:3000',
+      'exp://localhost:8081',
     ];
-    if (!origin || allowed.includes(origin)) {
+
+    const isLocalOrLan =
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:') ||
+      origin.startsWith('http://10.') ||
+      origin.startsWith('http://192.168.') ||
+      origin.startsWith('http://172.') ||
+      origin.startsWith('exp://') ||
+      origin.includes('ngrok') ||
+      origin.includes('.loca.lt');
+
+    if (allowed.includes(origin) || (env.NODE_ENV !== 'production' && isLocalOrLan)) {
       callback(null, true);
     } else {
       callback(new Error(`CORS: ${origin} not allowed`));
     }
   },
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
 }));
 app.use(compression());
 app.use(cookieParser());
@@ -56,7 +74,21 @@ app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev', {
 }));
 app.use(generalLimiter);
 
-// ─── Health Check ────────────────────────
+// ─── Health Check & Root ────────────────────
+app.get('/', (req, res) => {
+  const acceptHeader = req.headers.accept || '';
+  if (acceptHeader.includes('text/html')) {
+    return res.redirect(env.FRONTEND_URL);
+  }
+  return res.json({
+    name: 'LifePilot AI API Server',
+    status: 'running',
+    version: '1.0.0',
+    frontend: env.FRONTEND_URL,
+    health: '/health',
+  });
+});
+
 app.get('/health', async (req, res) => {
   const valkeyHealthy = await valkeyCache.isHealthy().catch(() => false);
   res.json({
@@ -78,6 +110,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/telegram', telegramRoutes);
 app.use('/api/preferences', preferenceRoutes);
+app.use('/api/sms', smsRoutes);
 
 // ─── Error handling ───────────────────────
 app.use(notFound);
@@ -93,10 +126,11 @@ async function main() {
     } catch (err) {
       logger.warn('Background workers could not start (Redis may be unavailable):', err);
     }
-    const server = app.listen(env.PORT, () => {
+    const server = app.listen(env.PORT, '0.0.0.0', () => {
       logger.info(`🚀 LifePilot AI Backend running on port ${env.PORT}`);
       logger.info(`   Environment: ${env.NODE_ENV}`);
       logger.info(`   Frontend URL: ${env.FRONTEND_URL}`);
+      logger.info(`   Listening on: http://0.0.0.0:${env.PORT}`);
     });
 
     // Port conflict handling

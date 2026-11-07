@@ -53,6 +53,22 @@ enum NotificationType {
   EMAIL
   PHONE_CALL
   IN_APP
+  SMS
+}
+
+enum SmsJobStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  RETRYING
+  CANCELLED
+}
+
+enum SmsGatewayStatus {
+  ONLINE
+  OFFLINE
+  PAUSED
 }
 
 enum NotificationStatus {
@@ -119,6 +135,8 @@ model User {
   syncLogs          SynchronizationLog[]
   telegramSubscriptions TelegramSubscription[]
   telegramLinkTokens TelegramLinkToken[]
+  smsJobs           SmsJob[]
+  smsGatewayDevices SmsGatewayDevice[]
 
   @@index([email])
   @@index([googleId])
@@ -522,6 +540,12 @@ model UserPreference {
   pushWebEnabled        Boolean  @default(true)
   pushAndroidEnabled    Boolean  @default(true)
   phoneCallsEnabled     Boolean  @default(false)
+  emailNotificationsEnabled Boolean @default(true)
+  emailCategories       TaskCategory[]
+  emailMinPriority      TaskPriority @default(MEDIUM)
+  smsNotificationsEnabled Boolean @default(true)
+  smsGatewayEnabled     Boolean  @default(false)
+  smsMinPriority        TaskPriority @default(HIGH)
   phoneNumber           String?
   phoneVerified         Boolean  @default(false)
   callCategories        TaskCategory[]
@@ -590,4 +614,63 @@ model TelegramLinkToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// ─────────────────────────────────────────
+// SMS JOB (SIM Gateway Queue)
+// ─────────────────────────────────────────
+
+model SmsJob {
+  id             String       @id @default(uuid())
+  userId         String
+  recipientPhone String
+  message        String       @db.Text
+  scheduledAt    DateTime     @default(now())
+  status         SmsJobStatus @default(PENDING)
+  retryCount     Int          @default(0)
+  maxRetries     Int          @default(3)
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  errorMessage   String?      @db.Text
+  claimedBy      String?      // deviceId of gateway
+  claimedAt      DateTime?
+  simSlot        Int?         @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gatewayDevice SmsGatewayDevice? @relation(fields: [claimedBy], references: [deviceId])
+
+  @@index([userId])
+  @@index([status, scheduledAt])
+  @@index([claimedBy])
+}
+
+// ─────────────────────────────────────────
+// SMS GATEWAY DEVICE (Android Phone)
+// ─────────────────────────────────────────
+
+model SmsGatewayDevice {
+  id              String           @id @default(uuid())
+  userId          String
+  deviceId        String           @unique
+  deviceName      String
+  simOperator     String?
+  simSlot         Int?             @default(0)
+  phoneNumber     String?
+  batteryLevel    Int?
+  isCharging      Boolean?         @default(false)
+  status          SmsGatewayStatus @default(ONLINE)
+  lastHeartbeatAt DateTime         @default(now())
+  isDefault       Boolean          @default(true)
+  smsSentCount    Int              @default(0)
+  smsFailedCount  Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  smsJobs SmsJob[]
+
+  @@index([userId])
+  @@index([status, lastHeartbeatAt])
 }

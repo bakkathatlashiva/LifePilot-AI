@@ -8,6 +8,7 @@
     "web"
   ],
   "scripts": {
+    "clean:ports": "powershell -Command \"@(3001, 5173, 8081) | ForEach-Object { $p = (Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue).OwningProcess; if ($p) { Stop-Process -Id $p -Force } }\"",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:web": "npm run dev --workspace=web",
     "build:backend": "npm run build --workspace=backend",

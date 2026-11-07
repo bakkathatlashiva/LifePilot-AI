@@ -7,7 +7,7 @@ import { Modal } from '../components/ui/Modal';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Input } from '../components/ui/Input';
 import { SuggestedTask, Email } from '../types';
-import api from '../lib/api';
+import api, { API_BASE_URL } from '../lib/api';
 import { formatRelative } from '../lib/utils';
 
 export function GmailPage() {
@@ -31,7 +31,7 @@ export function GmailPage() {
       setSuggestions(sugRes.data.data ?? []);
       setEmails(emailRes.data.data ?? []);
       setStatus(statusRes.data.data);
-    } catch {}
+    } catch { }
     finally { setLoading(false); }
   };
 
@@ -50,7 +50,8 @@ export function GmailPage() {
   };
 
   const handleConnectGmail = () => {
-    window.location.href = `${import.meta.env.VITE_API_URL ?? '/api'}/auth/google/gmail`;
+    const returnTo = encodeURIComponent(`${window.location.origin}/gmail`);
+    window.location.href = `${API_BASE_URL}/auth/google/gmail?returnTo=${returnTo}`;
   };
 
   const approveSuggestion = async (id: string, overrides?: Record<string, unknown>) => {
@@ -66,7 +67,7 @@ export function GmailPage() {
     try {
       await api.post(`/gmail/suggestions/${id}/reject`);
       setSuggestions((prev) => prev.filter((s) => s.id !== id));
-    } catch {}
+    } catch { }
   };
 
   const openEdit = (s: SuggestedTask) => {
@@ -140,11 +141,10 @@ export function GmailPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 capitalize ${
-              activeTab === tab
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 capitalize ${activeTab === tab
                 ? 'bg-purple-600 text-white shadow-lg'
                 : 'text-slate-400 hover:text-slate-200'
-            }`}
+              }`}
           >
             {tab === 'suggestions' ? `Task Suggestions (${suggestions.length})` : `Inbox Emails (${emails.length})`}
           </button>
@@ -295,10 +295,10 @@ function EmailCard({ email: e }: { email: Email }) {
           </div>
           <p className="text-sm font-medium text-slate-200 truncate">{e.subject ?? '(No subject)'}</p>
           <p className="text-xs text-slate-500 mt-0.5">{e.sender}</p>
-          {e.aiSummary && (
+          {(e.aiSummary || e.snippet) && (
             <p className="text-xs text-slate-400 mt-2 bg-dark-800 rounded-xl p-2 leading-relaxed">
               <Sparkles className="w-3 h-3 inline mr-1 text-purple-400" />
-              {e.aiSummary}
+              {e.aiSummary || e.snippet}
             </p>
           )}
         </div>

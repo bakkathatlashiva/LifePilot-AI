@@ -1,6 +1,19 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? '/api';
+export function normalizeApiUrl(url?: string): string {
+  // In development, prefer relative '/api' so Vite proxy forwards to backend without CORS or IP mismatches
+  if (!url || url === '/api' || url.includes('10.10.6.137')) {
+    return '/api';
+  }
+
+  const clean = url.trim().replace(/\/+$/, '');
+  if (!clean || clean === '/api') return '/api';
+  if (clean.endsWith('/api')) return clean;
+  return `${clean}/api`;
+}
+
+export const API_BASE_URL = normalizeApiUrl(import.meta.env.VITE_API_URL);
+const BASE_URL = API_BASE_URL;
 
 export const api = axios.create({
   baseURL: BASE_URL,

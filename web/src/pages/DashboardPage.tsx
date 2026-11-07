@@ -10,6 +10,7 @@ import { ERPStatus } from '../components/dashboard/ERPStatus';
 import { TaskChart } from '../components/dashboard/TaskChart';
 import { NotificationPanel } from '../components/dashboard/NotificationPanel';
 import { GmailSyncStatus } from '../components/dashboard/GmailSyncStatus';
+import { SmsGatewayWidget } from '../components/dashboard/SmsGatewayWidget';
 
 export function DashboardPage() {
   const { user } = useAuthStore();
@@ -53,6 +54,7 @@ export function DashboardPage() {
 
         {/* Right column: 1/3 */}
         <div className="space-y-4">
+          <SmsGatewayWidget />
           <ERPStatus />
           <GmailSyncStatus />
           <NotificationPanel />

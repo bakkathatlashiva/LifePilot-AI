@@ -36,5 +36,3 @@ new Worker(
   },
 );
 
-export { telegramQueue };
-

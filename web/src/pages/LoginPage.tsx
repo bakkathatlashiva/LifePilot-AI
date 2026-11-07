@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Zap, Shield, Bell, BookOpen, AlertCircle } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import api, { API_BASE_URL } from '../lib/api';
 
 export function LoginPage() {
   const { setTokens, loadProfile, isAuthenticated } = useAuthStore();
@@ -25,7 +26,8 @@ export function LoginPage() {
   }, [isAuthenticated, navigate]);
 
   const handleGoogleLogin = () => {
-    window.location.href = `${import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api'}/auth/google`;
+    const returnTo = encodeURIComponent(window.location.origin);
+    window.location.href = `${API_BASE_URL}/auth/google?returnTo=${returnTo}`;
   };
 
   const features = [

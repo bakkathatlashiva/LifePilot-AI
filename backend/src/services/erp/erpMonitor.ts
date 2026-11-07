@@ -221,7 +221,26 @@ async function scrapeAssignments(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
 
+    const page = await context.newPage();
+
+    // Abort unnecessary heavy network assets (images, fonts, media) to speed up scraping
+    await page.route("**/*", (route) => {
+      const type = route.request().resourceType();
+      if (["image", "media", "font"].includes(type)) {
+        return route.abort();
+      }
+      return route.continue();
+    });
+
     const storedSession = parseStoredSession(connection.sessionCookies);
+    if (storedSession.cookies && storedSession.cookies.length > 0) {
+      try {
+        await context.addCookies(storedSession.cookies);
+      } catch (cErr) {
+        logger.warn("[ERP] Failed to add stored cookies to context:", cErr);
+      }
+    }
+
     const loginUser =
       explicitCreds?.username ||
       storedSession.credentials?.username ||
@@ -231,53 +250,66 @@ async function scrapeAssignments(
       storedSession.credentials?.password ||
       env.AURORA_ERP_PASSWORD;
 
-    const page = await context.newPage();
-
-    logger.info(`[ERP] Logging into student portal as ${loginUser}...`);
-    await page.goto("https://admissions.aurora.edu.in/login", {
+    logger.info(`[ERP] Navigating directly to assessments for ${loginUser}...`);
+    await page.goto(connection.erpUrl, {
       waitUntil: "domcontentloaded",
-      timeout: 45000,
+      timeout: 25000,
     });
-    await page.fill("#credential", loginUser);
-    await page.fill("#password", loginPass);
-    await page.click('button[type="submit"]');
-    await page.waitForTimeout(6000);
 
     const isLogin =
       page.url().includes("login") ||
       (await page.$("#credential")) !== null;
 
     if (isLogin) {
-      throw new Error(`Failed to log in to Aurora ERP for ${loginUser}. Please check credentials.`);
+      logger.info(`[ERP] Session expired or fresh login needed. Logging in as ${loginUser}...`);
+      if (!page.url().includes("login")) {
+        await page.goto("https://admissions.aurora.edu.in/login", {
+          waitUntil: "domcontentloaded",
+          timeout: 25000,
+        });
+      }
+      await page.fill("#credential", loginUser);
+      await page.fill("#password", loginPass);
+      await page.click('button[type="submit"]');
+
+      await Promise.race([
+        page.waitForURL((url) => !url.href.includes("login"), { timeout: 10000 }),
+        page.waitForSelector(".dashboard, .navbar, #content, [class*='assessment'], table", { timeout: 10000 }),
+      ]).catch(() => {});
+
+      const stillLogin =
+        page.url().includes("login") ||
+        (await page.$("#credential")) !== null;
+
+      if (stillLogin) {
+        throw new Error(`Failed to log in to Aurora ERP for ${loginUser}. Please check credentials.`);
+      }
+
+      // Save fresh cookies to DB while retaining student credentials
+      const freshCookies = await context.cookies();
+      const currentCreds = explicitCreds || storedSession.credentials;
+
+      await prisma.eRPConnection.update({
+        where: { id: connection.id },
+        data: {
+          sessionCookies: encrypt(
+            JSON.stringify({
+              cookies: freshCookies,
+              ...(currentCreds ? { credentials: currentCreds } : {}),
+            })
+          ),
+          sessionExpiry: new Date(Date.now() + 12 * 60 * 60 * 1000),
+          lastSyncError: null,
+        },
+      });
+
+      if (!page.url().includes("/assessments")) {
+        await page.goto(connection.erpUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 25000,
+        });
+      }
     }
-
-    // Save fresh cookies to DB while retaining student credentials
-    const freshCookies = await context.cookies();
-    const currentCreds =
-      explicitCreds ||
-      storedSession.credentials;
-
-    await prisma.eRPConnection.update({
-      where: { id: connection.id },
-      data: {
-        sessionCookies: encrypt(
-          JSON.stringify({
-            cookies: freshCookies,
-            ...(currentCreds ? { credentials: currentCreds } : {}),
-          })
-        ),
-        sessionExpiry: new Date(Date.now() + 12 * 60 * 60 * 1000),
-        lastSyncError: null,
-      },
-    });
-
-    // Navigate to assessments module
-    logger.info(`[ERP] Navigating to assessments for ${loginUser}...`);
-    await page.goto(connection.erpUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 45000,
-    });
-    await page.waitForTimeout(5000);
 
     logger.info("[ERP] Successfully loaded assessment portal");
     const assignments = await extractAssignmentsFromPage(page);
@@ -296,7 +328,10 @@ async function extractAssignmentsFromPage(
   const assignmentsMap = new Map<string, ERPAssignmentData>();
 
   async function scrapeCurrentTermCards(termLabel: string) {
-    await page.waitForTimeout(2500);
+    await Promise.race([
+      page.waitForSelector('xpath=//button[contains(., "View assessments")]', { timeout: 4000 }),
+      page.waitForTimeout(1000),
+    ]);
     const viewButtons = await page.$$('xpath=//button[contains(., "View assessments")]');
     const cardCount = viewButtons.length;
     logger.info(`[ERP] [${termLabel}] Found ${cardCount} course cards`);
@@ -308,7 +343,10 @@ async function extractAssignmentsFromPage(
       try {
         logger.info(`[ERP] [${termLabel}] Opening course card ${i + 1}/${cardCount}...`);
         await btns[i].click();
-        await page.waitForTimeout(1800);
+        await Promise.race([
+          page.waitForSelector('table tbody tr', { timeout: 2500 }),
+          page.waitForTimeout(500),
+        ]);
 
         const courseData = await page.evaluate(() => {
           const courseHeading =
@@ -391,24 +429,30 @@ async function extractAssignmentsFromPage(
           }
         }
 
-        // Return to course list via Back to subjects button
+        // Return to course list via Back to subjects button with fast dynamic wait
         const backBtn = await page.$('button[aria-label="Back to subjects"]');
         if (backBtn) {
           await backBtn.click();
-          await page.waitForTimeout(1500);
+          await Promise.race([
+            page.waitForSelector('xpath=//button[contains(., "View assessments")]', { timeout: 2000 }),
+            page.waitForTimeout(300),
+          ]);
         } else {
           const textBack = await page.$(
             'xpath=//button[contains(., "Back to subjects") or contains(., "Subjects")]'
           );
           if (textBack) {
             await textBack.click();
-            await page.waitForTimeout(1500);
+            await Promise.race([
+              page.waitForSelector('xpath=//button[contains(., "View assessments")]', { timeout: 2000 }),
+              page.waitForTimeout(300),
+            ]);
           } else {
             await page.goto("https://admissions.aurora.edu.in/modules/assessments/assessments", {
               waitUntil: "domcontentloaded",
-              timeout: 45000,
+              timeout: 20000,
             });
-            await page.waitForTimeout(3500);
+            await page.waitForTimeout(800);
           }
         }
       } catch (err) {
@@ -417,8 +461,11 @@ async function extractAssignmentsFromPage(
     }
   }
 
-  // Wait for initial cards to render
-  await page.waitForTimeout(3000);
+  // Quick initial check for select / cards
+  await Promise.race([
+    page.waitForSelector('xpath=//button[contains(., "View assessments")]', { timeout: 3000 }),
+    page.waitForTimeout(800),
+  ]);
 
   // Aurora ERP automatically preselects the student's current active term (e.g. "Term 2").
   // We identify the current active term and scrape ONLY that term (never older/previous terms).
@@ -483,7 +530,7 @@ async function processAssignments(
         },
       });
 
-      // Auto-create task
+      // Auto-create task with automated deadline reminder schedules
       const task = await prisma.task.create({
         data: {
           userId,
@@ -496,6 +543,12 @@ async function processAssignments(
           priority: "HIGH",
           status: data.status === "CLOSED" ? "COMPLETED" : "IN_PROGRESS",
           tags: data.subject ? [data.subject] : [],
+          reminderSchedules: {
+            create: [
+              { userId, minutesBefore: 1440 }, // 1 day before
+              { userId, minutesBefore: 120 },  // 2 hours before
+            ],
+          },
         },
       });
 
@@ -671,7 +724,7 @@ export async function authenticateAndSyncWithCredentials(
   logger.info(`[ERP] Authenticating user ${userId} with ERP credentials (${username})...`);
   const browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
 
   try {
@@ -680,11 +733,26 @@ export async function authenticateAndSyncWithCredentials(
     });
     const page = await context.newPage();
 
-    await page.goto('https://admissions.aurora.edu.in/login', { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.fill('#credential', username);
-    await page.fill('#password', password);
+    // Abort heavy assets to ensure rapid login and scraping
+    await page.route('**/*', (route) => {
+      const type = route.request().resourceType();
+      if (['image', 'media', 'font'].includes(type)) return route.abort();
+      return route.continue();
+    });
+
+    await page.goto('https://admissions.aurora.edu.in/login', { waitUntil: 'domcontentloaded', timeout: 25000 });
+    const trimmedUser = username.trim();
+    // Support both Student Roll Numbers (252U1R9175) and Email addresses (student@aurora.edu.in)
+    const cleanUser = trimmedUser.includes('@') ? trimmedUser : trimmedUser.toUpperCase();
+    const cleanPass = password.trim();
+    await page.fill('#credential', cleanUser);
+    await page.fill('#password', cleanPass);
     await page.click('button[type="submit"]');
-    await page.waitForTimeout(6000);
+
+    await Promise.race([
+      page.waitForURL((url) => !url.href.includes('login'), { timeout: 8000 }),
+      page.waitForSelector('.dashboard, .navbar, #content, [class*="assessment"], table', { timeout: 8000 }),
+    ]).catch(() => {});
 
     const isStillOnLogin = page.url().includes('login') || (await page.$('#credential')) !== null;
     if (isStillOnLogin) {
@@ -694,39 +762,46 @@ export async function authenticateAndSyncWithCredentials(
     const cookies = await context.cookies();
     const connectionId = await saveERPSession(userId, erpUrl, cookies, { username, password });
 
-    // Multi-user isolation:
-    // When a student authenticates (whether fresh or changing credentials),
-    // clear previous student's ERP assignments and tasks so other students' records never bleed over!
+    // Multi-user isolation: clear previous student's ERP assignments and tasks
     await prisma.eRPAssignment.deleteMany({
       where: { erpConnectionId: connectionId },
     });
     await prisma.task.deleteMany({
       where: { userId, source: 'ERP' },
     });
-    logger.info(`[ERP] Cleared previous assignments for connection ${connectionId} for clean re-sync`);
+    logger.info(`[ERP] Cleared previous assignments for connection ${connectionId} for clean sync`);
 
     // Invalidate Valkey cache on credential switch
     await valkeyCache.delPattern('valkey:erp:*');
     await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
 
-    // Set connection status to RUNNING so the frontend immediately reflects active background monitor
+    // Navigate directly to assessments and scrape immediately on current authenticated session
+    logger.info(`[ERP] Immediate live scrape on authenticated session for ${username}...`);
+    await page.goto(erpUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+
+    const assignments = await extractAssignmentsFromPage(page);
+    let newCount = 0;
+    if (assignments.length > 0) {
+      const res = await processAssignments(userId, connectionId, assignments);
+      newCount = res.newCount;
+    }
+
     await prisma.eRPConnection.update({
       where: { id: connectionId },
       data: {
-        lastSyncStatus: 'RUNNING',
+        lastSyncStatus: 'SUCCESS',
+        lastSyncAt: new Date(),
         lastSyncError: null,
       },
     });
 
+    await valkeyCache.delPattern('valkey:erp:*');
+    await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
+
     await browser.close();
 
-    // Trigger full automated sync in the background immediately with the entered credentials
-    runERPSync(connectionId, { username, password }).catch((err) => {
-      logger.error(`[ERP Background Sync] Sync failed for ${connectionId}:`, err);
-    });
-
-    logger.info(`[ERP] Credentials verified for ${username}. Automated background monitor started.`);
-    return { connectionId, assignmentCount: 0 };
+    logger.info(`[ERP] Connected and live-synced ${assignments.length} assignments for ${username}.`);
+    return { connectionId, assignmentCount: assignments.length };
   } catch (err) {
     if (browser) {
       try { await browser.close(); } catch {}

@@ -13,6 +13,7 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { StudyPlannerPage } from './pages/StudyPlannerPage';
+import { SmsGatewayPage } from './pages/SmsGatewayPage';
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/erp" element={<ERPPage />} />
         <Route path="/gmail" element={<GmailPage />} />
+        <Route path="/sms-gateway" element={<SmsGatewayPage />} />
         <Route path="/exams" element={<ExamsPage />} />
         <Route path="/study" element={<StudyPlannerPage />} />
         <Route path="/calendar" element={<CalendarPage />} />

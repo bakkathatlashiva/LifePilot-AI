@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CheckSquare, BookOpen, Mail, GraduationCap,
   Calendar, Bell, MessageSquare, Settings, LogOut, ChevronLeft,
-  ChevronRight, Zap, Trophy, ClipboardList, User2
+  ChevronRight, Zap, Trophy, ClipboardList, User2, Smartphone
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../store/authStore';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/tasks', icon: CheckSquare, label: 'My Tasks' },
   { to: '/erp', icon: ClipboardList, label: 'ERP Assignments' },
   { to: '/gmail', icon: Mail, label: 'Gmail Intel' },
+  { to: '/sms-gateway', icon: Smartphone, label: 'SIM Gateway' },
   { to: '/study', icon: BookOpen, label: 'Study Planner' },
   { to: '/exams', icon: GraduationCap, label: 'Exams' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },

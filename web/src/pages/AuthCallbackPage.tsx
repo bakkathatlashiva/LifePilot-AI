@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { PageLoader } from '../components/ui/LoadingSpinner';
+import api from '../lib/api';
 
 export function AuthCallbackPage() {
   const { setTokens, loadProfile } = useAuthStore();
@@ -12,6 +13,7 @@ export function AuthCallbackPage() {
   useEffect(() => {
     if (handledRef.current) return;
 
+    const code = searchParams.get('code');
     const accessToken = searchParams.get('accessToken');
     const refreshToken = searchParams.get('refreshToken');
     const error = searchParams.get('message') || searchParams.get('error');
@@ -28,6 +30,16 @@ export function AuthCallbackPage() {
       loadProfile()
         .then(() => navigate('/dashboard', { replace: true }))
         .catch(() => navigate('/login?error=profile_fetch_failed', { replace: true }));
+    } else if (code) {
+      handledRef.current = true;
+      api.post('/auth/exchange-code', { code })
+        .then(({ data }) => {
+          const { accessToken: at, refreshToken: rt } = data.data;
+          setTokens(at, rt);
+          return loadProfile();
+        })
+        .then(() => navigate('/dashboard', { replace: true }))
+        .catch(() => navigate('/login?error=auth_failed', { replace: true }));
     } else {
       handledRef.current = true;
       navigate('/login', { replace: true });

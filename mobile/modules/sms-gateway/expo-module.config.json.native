@@ -1,0 +1,8 @@
+{
+  "name": "sms-gateway",
+  "platforms": ["android"],
+  "android": {
+    "package": "expo.modules.smsgateway.SmsGatewayModule"
+  }
+}
+

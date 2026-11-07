@@ -31,6 +31,7 @@ export const env = {
   GOOGLE_CLIENT_ID: requireEnv('GOOGLE_CLIENT_ID'),
   GOOGLE_CLIENT_SECRET: requireEnv('GOOGLE_CLIENT_SECRET'),
   GOOGLE_REDIRECT_URI: optional('GOOGLE_REDIRECT_URI', 'http://localhost:3001/api/auth/google/callback'),
+  GOOGLE_ANDROID_CLIENT_ID: optional('GOOGLE_ANDROID_CLIENT_ID', '262381768373-u9n98t1f3ct48jiaflaj17ek45fpjm1g.apps.googleusercontent.com'),
 
   // OpenAI
   OPENAI_API_KEY: requireEnv('OPENAI_API_KEY'),
@@ -61,6 +62,7 @@ export const env = {
   // Aurora ERP
   AURORA_ERP_URL: optional('AURORA_ERP_URL', 'https://admissions.aurora.edu.in/modules/assessments/assessments'),
   AURORA_ERP_USER: optional('AURORA_ERP_USER', ''),
+  AURORA_ERP_PASSWORD: optional('AURORA_ERP_PASSWORD', ''),
   // Telegram integration (optional)
   TELEGRAM_BOT_TOKEN: optional('TELEGRAM_BOT_TOKEN'),
   TELEGRAM_BOT_USERNAME: optional('TELEGRAM_BOT_USERNAME'),

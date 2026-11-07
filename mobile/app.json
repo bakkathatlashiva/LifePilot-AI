@@ -4,6 +4,11 @@
     "slug": "lifepilot-ai",
     "version": "1.0.0",
     "orientation": "portrait",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -11,7 +16,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0f172a"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lifepilotai.app"
@@ -27,7 +34,9 @@
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "INTERNET",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "SEND_SMS",
+        "READ_PHONE_STATE"
       ],
       "googleServicesFile": "./google-services.json"
     },
@@ -53,13 +62,16 @@
             "buildToolsVersion": "35.0.0"
           }
         }
-      ]
+      ],
+      "expo-asset",
+      "expo-secure-store"
     ],
+    "scheme": "lifepilot",
     "extra": {
       "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID"
+        "projectId": "69c2893c-ddf0-4ab0-8d48-698cc2a66475"
       }
     },
-    "scheme": "lifepilot"
+    "owner": "shiva_4"
   }
 }

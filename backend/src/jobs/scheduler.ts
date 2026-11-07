@@ -3,8 +3,14 @@ import { redis } from '../config/redis';
 import { logger } from '../utils/logger';
 import { runERPSync } from '../services/erp/erpMonitor';
 import { syncGmail } from '../services/gmail/gmailService';
-import { processScheduledNotifications, checkAndCreateDeadlineReminders } from '../services/notifications/notificationService';
+import {
+  processScheduledNotifications,
+  checkAndCreateDeadlineReminders,
+  checkAndSend12HourSmsReminders,
+  checkAndSend24HourDeadlineSmsReminders,
+} from '../services/notifications/notificationService';
 import { prisma } from '../config/database';
+import { emailQueue, emailWorker } from '../queues/email.queue';
 import cron from 'node-cron';
 
 // ─── Queues ───────────────────────────────
@@ -78,13 +84,81 @@ export function startWorkers() {
 export function startCronJobs() {
   // Process pending notifications every 2 minutes
   cron.schedule('*/2 * * * *', async () => {
-    await notificationQueue.add('process', {});
+    try {
+      await notificationQueue.add('process', {});
+    } catch {
+      processScheduledNotifications().catch((err) => logger.error('[Scheduler] Direct notification process error:', err));
+    }
   });
 
-  // Check deadline reminders every 5 minutes
+  // Check deadline reminders & send automated email notifications every 5 minutes
   cron.schedule('*/5 * * * *', async () => {
-    await notificationQueue.add('check-deadlines', {});
+    try {
+      await notificationQueue.add('check-deadlines', {});
+    } catch {
+      checkAndCreateDeadlineReminders().catch((err) => logger.error('[Scheduler] Direct deadline check error:', err));
+    }
   });
+
+  // Reclaim stale SMS jobs and update offline gateway statuses every 2 minutes
+  cron.schedule('*/2 * * * *', async () => {
+    try {
+      const now = new Date();
+      const staleThreshold = new Date(now.getTime() - 3 * 60 * 1000);
+      const offlineThreshold = new Date(now.getTime() - 2 * 60 * 1000);
+
+      // Reclaim jobs stuck in PROCESSING
+      await prisma.smsJob.updateMany({
+        where: {
+          status: 'PROCESSING',
+          claimedAt: { lt: staleThreshold },
+        },
+        data: {
+          status: 'RETRYING',
+          claimedBy: null,
+          claimedAt: null,
+          errorMessage: 'Stale job reclaimed by scheduler: gateway did not report result within 3 minutes',
+        },
+      });
+
+      // Mark inactive gateways as OFFLINE
+      await prisma.smsGatewayDevice.updateMany({
+        where: {
+          status: 'ONLINE',
+          lastHeartbeatAt: { lt: offlineThreshold },
+        },
+        data: {
+          status: 'OFFLINE',
+        },
+      });
+    } catch (err) {
+      logger.error('[Scheduler] SMS gateway maintenance error:', err);
+    }
+  });
+
+  // 12-Hour Automated SMS Reminders for Open ERP Assignments (Runs hourly to detect 12h windows)
+  cron.schedule('0 * * * *', async () => {
+    checkAndSend12HourSmsReminders().catch((err) =>
+      logger.error('[Scheduler] Error in 12h SMS reminder check:', err)
+    );
+  });
+
+  // 24-Hour Urgent Deadline SMS Alerts (Runs every 15 minutes to guarantee immediate trigger)
+  cron.schedule('*/15 * * * *', async () => {
+    checkAndSend24HourDeadlineSmsReminders().catch((err) =>
+      logger.error('[Scheduler] Error in 24h deadline SMS alert:', err)
+    );
+  });
+
+  // Initial SMS check on startup
+  setTimeout(() => {
+    checkAndSend24HourDeadlineSmsReminders().catch((err) =>
+      logger.error('[Scheduler] Initial 24h deadline SMS check failed:', err)
+    );
+    checkAndSend12HourSmsReminders().catch((err) =>
+      logger.error('[Scheduler] Initial 12h SMS reminder check failed:', err)
+    );
+  }, 5000);
 
   // Schedule automated ERP syncs: evaluates every minute against each connection's configured interval
   cron.schedule('* * * * *', async () => {

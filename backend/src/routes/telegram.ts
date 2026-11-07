@@ -53,8 +53,9 @@ router.post('/link-token', requireAuth, async (req: AuthRequest, res) => {
  */
 router.get('/status', requireAuth, async (req: AuthRequest, res) => {
   try {
-    const sub = await prisma.telegramSubscription.findUnique({
-      where: { userId: req.user!.id },
+    const userId = req.user!.userId ?? req.user!.id;
+    const sub = await prisma.telegramSubscription.findFirst({
+      where: { userId },
     });
     if (!sub) {
       return sendSuccess(res, { linked: false }, 'Telegram not linked');
@@ -97,16 +98,17 @@ router.patch('/settings', requireAuth, async (req: AuthRequest, res) => {
     return sendError(res, 'Invalid payload – `enabled` must be boolean', 400);
   }
   try {
-    const sub = await prisma.telegramSubscription.upsert({
-      where: { userId: req.user!.id },
-      create: {
-        userId: req.user!.id,
-        telegramChatId: '', // placeholder – will be filled on /start
-        isEnabled: enabled,
-      },
-      update: { isEnabled: enabled },
+    const userId = req.user!.userId ?? req.user!.id;
+    const existing = await prisma.telegramSubscription.findFirst({
+      where: { userId },
     });
-    sendSuccess(res, { enabled: sub.isEnabled }, 'Telegram settings updated');
+    if (existing) {
+      await prisma.telegramSubscription.update({
+        where: { id: existing.id },
+        data: { isEnabled: enabled },
+      });
+    }
+    sendSuccess(res, { enabled }, 'Telegram settings updated');
   } catch (error: any) {
     sendError(res, error.message ?? 'Failed to update settings', 500);
   }
@@ -214,7 +216,7 @@ router.post('/webhook', async (req, res) => {
       break;
     }
     case '/status': {
-      const sub = await prisma.telegramSubscription.findUnique({
+      const sub = await prisma.telegramSubscription.findFirst({
         where: { telegramChatId: chatId.toString() },
       });
       if (!sub) {

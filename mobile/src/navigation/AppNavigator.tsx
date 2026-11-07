@@ -10,6 +10,7 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { TasksScreen } from '../screens/TasksScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
+import { SmsGatewayScreen } from '../screens/SmsGatewayScreen';
 import { PageLoader } from '../components/PageLoader';
 import { registerForPushNotificationsAsync } from '../lib/notifications';
 
@@ -18,7 +19,7 @@ const Tab = createBottomTabNavigator();
 
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
   const icons: Record<string, string> = {
-    Dashboard: '🏠', Tasks: '✅', Notifications: '🔔', Settings: '⚙️'
+    Dashboard: '🏠', Tasks: '✅', Notifications: '🔔', SMSGateway: '📶'
   };
   return (
     <View style={{ alignItems: 'center' }}>
@@ -47,6 +48,7 @@ function MainTabs() {
       <Tab.Screen name="Dashboard" component={DashboardScreen} />
       <Tab.Screen name="Tasks" component={TasksScreen} />
       <Tab.Screen name="Notifications" component={NotificationsScreen} />
+      <Tab.Screen name="SMSGateway" component={SmsGatewayScreen} options={{ tabBarLabel: 'SIM Gateway' }} />
     </Tab.Navigator>
   );
 }

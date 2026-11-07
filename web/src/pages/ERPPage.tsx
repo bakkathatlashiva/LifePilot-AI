@@ -419,15 +419,19 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
 
   const handleCredentialsLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setError('Please provide your Student ID and Password');
+    const trimmedUser = username.trim();
+    // Support both Student Roll Numbers and Email addresses
+    const cleanUsername = trimmedUser.includes('@') ? trimmedUser : trimmedUser.toUpperCase();
+    const cleanPassword = password.trim();
+    if (!cleanUsername || !cleanPassword) {
+      setError('Please provide your Student ID or Email and Password');
       return;
     }
     setSaving(true);
     setError('');
     setSuccessMsg('');
     try {
-      const res = await api.post('/erp/connect-credentials', { username, password }, { timeout: 60000 });
+      const res = await api.post('/erp/connect-credentials', { username: cleanUsername, password: cleanPassword }, { timeout: 60000 });
       setSuccessMsg(res.data.message || 'Connected successfully! Live automated monitoring has started.');
       // Give backend a moment to clear caches, then notify parent to refresh UI
       setTimeout(() => {
@@ -437,7 +441,7 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
       if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
         setError('Portal response was slow, but if credentials were valid your monitor is starting. Please wait a moment.');
       } else {
-        setError(e.response?.data?.message ?? 'Failed to connect. Please verify your Student ID and Password.');
+        setError(e.response?.data?.message ?? 'Failed to connect. Please verify your Student ID/Email and Password.');
       }
     } finally {
       setSaving(false);
@@ -500,13 +504,13 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">Student User ID / Hall Ticket</label>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Student User ID / Email / Hall Ticket</label>
             <input
               type="text"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              placeholder="e.g. Student ID / Roll Number"
-              className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60"
+              placeholder="Enter Student ID / Roll Number or Email"
+              className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60 font-mono"
             />
           </div>
           <div>
@@ -518,6 +522,7 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
               placeholder="Enter your ERP portal password"
               className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60"
             />
+            <p className="text-[11px] text-slate-400 mt-1">Supports Student Roll Number or Registered Email Address · Password is case-sensitive.</p>
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
           {successMsg && <p className="text-emerald-400 text-sm">{successMsg}</p>}
