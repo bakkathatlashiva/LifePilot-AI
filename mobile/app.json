@@ -37,8 +37,7 @@
         "ACCESS_NETWORK_STATE",
         "SEND_SMS",
         "READ_PHONE_STATE"
-      ],
-      "googleServicesFile": "./google-services.json"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

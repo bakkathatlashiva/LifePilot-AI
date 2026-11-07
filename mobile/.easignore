@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Expo
+.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Environment
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+build/
+web-build/
+
+# Do NOT ignore google-services.json for EAS cloud builds
+!google-services.json
