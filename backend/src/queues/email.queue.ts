@@ -19,6 +19,10 @@ export const emailQueue = new Queue('email-notifications', {
   },
 });
 
+emailQueue.on('error', (err) => {
+  logger.warn(`[Email Queue] Redis warning: ${err.message}`);
+});
+
 // --------------------------------------------------------------------------
 // Worker – processes email jobs from the queue
 export const emailWorker = new Worker(
@@ -42,6 +46,10 @@ export const emailWorker = new Worker(
     concurrency: 3,
   },
 );
+
+emailWorker.on('error', (err) => {
+  logger.warn(`[Email Worker] Redis warning: ${err.message}`);
+});
 
 emailWorker.on('failed', (job, err) => {
   logger.error(`[Email Worker] Job ${job?.id} failed definitively:`, err.message);

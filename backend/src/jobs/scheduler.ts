@@ -23,6 +23,7 @@ export const erpQueue = new Queue('erp-sync', {
     removeOnFail: 50,
   },
 });
+erpQueue.on('error', (err) => logger.warn(`[ERP Queue] Redis warning: ${err.message}`));
 
 export const gmailQueue = new Queue('gmail-sync', {
   connection: redis,
@@ -33,6 +34,7 @@ export const gmailQueue = new Queue('gmail-sync', {
     removeOnFail: 50,
   },
 });
+gmailQueue.on('error', (err) => logger.warn(`[Gmail Queue] Redis warning: ${err.message}`));
 
 export const notificationQueue = new Queue('notifications', {
   connection: redis,
@@ -43,6 +45,7 @@ export const notificationQueue = new Queue('notifications', {
     removeOnFail: 100,
   },
 });
+notificationQueue.on('error', (err) => logger.warn(`[Notif Queue] Redis warning: ${err.message}`));
 
 // ─── Workers ──────────────────────────────
 export function startWorkers() {
@@ -72,6 +75,10 @@ export function startWorkers() {
     },
     { connection: redis, concurrency: 1 }
   );
+
+  erpWorker.on('error', (err) => logger.warn(`[ERP Worker] Redis warning: ${err.message}`));
+  gmailWorker.on('error', (err) => logger.warn(`[Gmail Worker] Redis warning: ${err.message}`));
+  notifWorker.on('error', (err) => logger.warn(`[Notif Worker] Redis warning: ${err.message}`));
 
   erpWorker.on('failed', (job, err) => logger.error(`[ERP Worker] Job ${job?.id} failed:`, err));
   gmailWorker.on('failed', (job, err) => logger.error(`[Gmail Worker] Job ${job?.id} failed:`, err));

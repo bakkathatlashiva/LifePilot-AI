@@ -2,16 +2,21 @@ import { Redis } from 'ioredis';
 import { env } from './env';
 import { logger } from '../utils/logger';
 
-// Parse connection URL (accepts valkey:// or redis://)
+// Parse connection URL (accepts valkey://, redis://, rediss://)
 const rawUrl = env.VALKEY_URL || env.REDIS_URL || 'redis://127.0.0.1:6379';
 const normalizedUrl = rawUrl.replace(/^valkey:\/\//i, 'redis://');
+const isTls = normalizedUrl.startsWith('rediss://');
 
 export const valkeyClient = new Redis(normalizedUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
   lazyConnect: false,
+  tls: isTls ? { rejectUnauthorized: false } : undefined,
   retryStrategy(times) {
-    const delay = Math.min(times * 100, 3000);
+    if (times > 20) {
+      return 10000;
+    }
+    const delay = Math.min(times * 150, 3000);
     return delay;
   },
 });
@@ -25,7 +30,7 @@ valkeyClient.on('connect', async () => {
     const versionMatch = info.match(/(?:valkey_version|redis_version):([^\r\n]+)/);
     const version = versionMatch ? versionMatch[1].trim() : 'active';
     isValkeyConnected = true;
-    logger.info(`✅ In-Memory Data Store connected: ${isValkey ? 'Valkey' : 'Redis'} (v${version}) on port 6379`);
+    logger.info(`✅ In-Memory Data Store connected: ${isValkey ? 'Valkey' : 'Redis'} (v${version})`);
   } catch {
     isValkeyConnected = true;
     logger.info('✅ In-Memory Data Store (Valkey/Redis) connected');

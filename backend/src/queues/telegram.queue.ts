@@ -16,9 +16,13 @@ export const telegramQueue = new Queue('telegram-notifications', {
   },
 });
 
+telegramQueue.on('error', (err) => {
+  logger.warn(`[Telegram Queue] Redis warning: ${err.message}`);
+});
+
 // --------------------------------------------------------------------------
 // Worker – processes jobs from the queue
-new Worker(
+export const telegramWorker = new Worker(
   'telegram-notifications',
   async (job: Job<{ chatId: string; text: string; options?: any }>) => {
     const { chatId, text, options } = job.data;
@@ -35,4 +39,8 @@ new Worker(
     concurrency: 5,
   },
 );
+
+telegramWorker.on('error', (err) => {
+  logger.warn(`[Telegram Worker] Redis warning: ${err.message}`);
+});
 

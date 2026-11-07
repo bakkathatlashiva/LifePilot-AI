@@ -1,5 +1,15 @@
+import fs from 'fs';
+import path from 'path';
 import winston from 'winston';
 import { env } from '../config/env';
+
+// Ensure logs directory exists
+const logDir = path.resolve(process.cwd(), 'logs');
+if (!fs.existsSync(logDir)) {
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+  } catch {}
+}
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
