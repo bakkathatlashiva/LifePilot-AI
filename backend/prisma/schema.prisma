@@ -1,0 +1,593 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum TaskCategory {
+  COLLEGE_ASSIGNMENT
+  EXAM
+  STUDY_SESSION
+  PROJECT
+  HACKATHON
+  EVENT
+  WORKSHOP
+  PERSONAL
+  MEETING
+  REMINDER
+}
+
+enum TaskStatus {
+  UPCOMING
+  AVAILABLE
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TaskSource {
+  ERP
+  GMAIL
+  MANUAL
+  AI_SUGGESTED
+}
+
+enum NotificationType {
+  PUSH_ANDROID
+  PUSH_WEB
+  EMAIL
+  PHONE_CALL
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  DISMISSED
+  SNOOZED
+}
+
+enum SyncStatus {
+  SUCCESS
+  FAILED
+  PARTIAL
+  RUNNING
+}
+
+enum CallStatus {
+  QUEUED
+  INITIATED
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  BUSY
+  NO_ANSWER
+}
+
+enum AssignmentStatus {
+  UPCOMING
+  AVAILABLE
+  CLOSED
+  CANCELLED
+}
+
+// ─────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────
+
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  name              String
+  profilePicture    String?
+  googleId          String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  lastLoginAt       DateTime?
+  isActive          Boolean  @default(true)
+
+  connectedAccounts ConnectedAccount[]
+  erpConnections    ERPConnection[]
+  tasks             Task[]
+  emails            Email[]
+  suggestedTasks    SuggestedTask[]
+  subjects          Subject[]
+  exams             Exam[]
+  studySessions     StudySession[]
+  events            Event[]
+  notifications     Notification[]
+  reminderSchedules ReminderSchedule[]
+  phoneCallLogs     PhoneCallLog[]
+  preferences       UserPreference?
+  syncLogs          SynchronizationLog[]
+  telegramSubscriptions TelegramSubscription[]
+  telegramLinkTokens TelegramLinkToken[]
+
+  @@index([email])
+  @@index([googleId])
+}
+
+// ─────────────────────────────────────────
+// CONNECTED ACCOUNTS
+// ─────────────────────────────────────────
+
+model ConnectedAccount {
+  id            String   @id @default(uuid())
+  userId        String
+  provider      String   // "google_gmail", "google_erp", etc.
+  accessToken   String   @db.Text
+  refreshToken  String?  @db.Text
+  tokenExpiry   DateTime?
+  scope         String?  @db.Text
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────
+// ERP CONNECTION
+// ─────────────────────────────────────────
+
+model ERPConnection {
+  id                  String    @id @default(uuid())
+  userId              String
+  erpUrl              String
+  monitoringInterval  Int       @default(30) // minutes
+  isActive            Boolean   @default(true)
+  lastSyncAt          DateTime?
+  lastSyncStatus      SyncStatus?
+  lastSyncError       String?   @db.Text
+  sessionCookies      String?   @db.Text // encrypted JSON
+  sessionExpiry       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignments ERPAssignment[]
+
+  @@unique([userId, erpUrl])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────
+// ERP ASSIGNMENT
+// ─────────────────────────────────────────
+
+model ERPAssignment {
+  id              String           @id @default(uuid())
+  erpConnectionId String
+  erpId           String           // ID from ERP system
+  title           String
+  subject         String?
+  description     String?          @db.Text
+  openingDate     DateTime?
+  closingDate     DateTime?
+  status          AssignmentStatus @default(UPCOMING)
+  maxMarks        Float?
+  submittedAt     DateTime?
+  rawData         Json?            // full raw snapshot
+  isNew           Boolean          @default(true)
+  isNotified      Boolean          @default(false)
+  taskId          String?          @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  erpConnection ERPConnection       @relation(fields: [erpConnectionId], references: [id], onDelete: Cascade)
+  task          Task?               @relation(fields: [taskId], references: [id])
+  history       AssignmentHistory[]
+
+  @@unique([erpConnectionId, erpId])
+  @@index([erpConnectionId])
+  @@index([closingDate])
+}
+
+// ─────────────────────────────────────────
+// ASSIGNMENT HISTORY
+// ─────────────────────────────────────────
+
+model AssignmentHistory {
+  id              String   @id @default(uuid())
+  assignmentId    String
+  changedFields   Json     // { field: { old, new } }
+  changeType      String   // "CREATED" | "DEADLINE_EXTENDED" | "DEADLINE_SHORTENED" | "CANCELLED" | "STATUS_CHANGED"
+  detectedAt      DateTime @default(now())
+  snapshotData    Json?
+
+  assignment ERPAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId])
+  @@index([detectedAt])
+}
+
+// ─────────────────────────────────────────
+// EMAIL
+// ─────────────────────────────────────────
+
+model Email {
+  id              String   @id @default(uuid())
+  userId          String
+  gmailMessageId  String   @unique
+  threadId        String?
+  subject         String?
+  sender          String?
+  senderEmail     String?
+  snippet         String?  @db.Text
+  bodyText        String?  @db.Text
+  receivedAt      DateTime?
+  isRead          Boolean  @default(false)
+  isImportant     Boolean  @default(false)
+  aiAnalyzed      Boolean  @default(false)
+  aiCategory      String?
+  aiSummary       String?  @db.Text
+  labelIds        String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  suggestedTasks SuggestedTask[]
+
+  @@index([userId])
+  @@index([receivedAt])
+  @@index([gmailMessageId])
+}
+
+// ─────────────────────────────────────────
+// SUGGESTED TASK (from AI email analysis)
+// ─────────────────────────────────────────
+
+model SuggestedTask {
+  id              String       @id @default(uuid())
+  userId          String
+  emailId         String?
+  title           String
+  description     String?      @db.Text
+  category        TaskCategory
+  priority        TaskPriority @default(MEDIUM)
+  suggestedDueDate DateTime?
+  aiConfidence    Float?       // 0-1
+  aiReason        String?      @db.Text
+  isApproved      Boolean?     // null=pending, true=approved, false=rejected
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  taskId          String?      @unique
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  user  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email Email?  @relation(fields: [emailId], references: [id])
+  task  Task?   @relation(fields: [taskId], references: [id])
+
+  @@index([userId])
+  @@index([isApproved])
+}
+
+// ─────────────────────────────────────────
+// TASK
+// ─────────────────────────────────────────
+
+model Task {
+  id              String       @id @default(uuid())
+  userId          String
+  title           String
+  description     String?      @db.Text
+  category        TaskCategory
+  source          TaskSource   @default(MANUAL)
+  startDate       DateTime?
+  openingDate     DateTime?
+  deadline        DateTime?
+  priority        TaskPriority @default(MEDIUM)
+  status          TaskStatus   @default(UPCOMING)
+  completedAt     DateTime?
+  isRecurring     Boolean      @default(false)
+  recurringRule   String?      // cron expression
+  parentTaskId    String?
+  tags            String[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentTask       Task?              @relation("SubTasks", fields: [parentTaskId], references: [id])
+  subTasks         Task[]             @relation("SubTasks")
+  reminderSchedules ReminderSchedule[]
+  notifications    Notification[]
+  erpAssignment    ERPAssignment?
+  suggestedTask    SuggestedTask?
+
+  @@index([userId])
+  @@index([status])
+  @@index([deadline])
+  @@index([category])
+}
+
+// ─────────────────────────────────────────
+// SUBJECT
+// ─────────────────────────────────────────
+
+model Subject {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  code        String?
+  semester    Int?
+  credits     Int?
+  color       String?  @default("#6366f1")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exams         Exam[]
+  studySessions StudySession[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────
+// EXAM
+// ─────────────────────────────────────────
+
+model Exam {
+  id              String   @id @default(uuid())
+  userId          String
+  subjectId       String?
+  title           String
+  examDate        DateTime
+  duration        Int?     // minutes
+  venue           String?
+  syllabus        Json?    // [{ chapter, topics[], completed }]
+  notes           String?  @db.Text
+  totalMarks      Float?
+  passingMarks    Float?
+  isCompleted     Boolean  @default(false)
+  score           Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject       Subject?       @relation(fields: [subjectId], references: [id])
+  studySessions StudySession[]
+
+  @@index([userId])
+  @@index([examDate])
+}
+
+// ─────────────────────────────────────────
+// STUDY SESSION
+// ─────────────────────────────────────────
+
+model StudySession {
+  id          String    @id @default(uuid())
+  userId      String
+  subjectId   String?
+  examId      String?
+  title       String
+  scheduledAt DateTime
+  durationMin Int       @default(60)
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+  notes       String?   @db.Text
+  topicsCovered String[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject? @relation(fields: [subjectId], references: [id])
+  exam    Exam?    @relation(fields: [examId], references: [id])
+
+  @@index([userId])
+  @@index([scheduledAt])
+}
+
+// ─────────────────────────────────────────
+// EVENT
+// ─────────────────────────────────────────
+
+model Event {
+  id              String   @id @default(uuid())
+  userId          String
+  title           String
+  description     String?  @db.Text
+  category        String?
+  startDate       DateTime
+  endDate         DateTime?
+  location        String?
+  registrationDeadline DateTime?
+  isRegistered    Boolean  @default(false)
+  registrationUrl String?
+  source          String?  // "GMAIL", "ERP", "MANUAL"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([startDate])
+}
+
+// ─────────────────────────────────────────
+// NOTIFICATION
+// ─────────────────────────────────────────
+
+model Notification {
+  id          String             @id @default(uuid())
+  userId      String
+  taskId      String?
+  type        NotificationType
+  status      NotificationStatus @default(PENDING)
+  title       String
+  body        String             @db.Text
+  data        Json?
+  scheduledAt DateTime
+  sentAt      DateTime?
+  readAt      DateTime?
+  snoozedUntil DateTime?
+  failureReason String?
+  retryCount  Int                @default(0)
+  maxRetries  Int                @default(3)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+// ─────────────────────────────────────────
+// REMINDER SCHEDULE
+// ─────────────────────────────────────────
+
+model ReminderSchedule {
+  id          String   @id @default(uuid())
+  userId      String
+  taskId      String
+  minutesBefore Int    // e.g. 60 = 1 hour before deadline
+  channels    NotificationType[]
+  isActive    Boolean  @default(true)
+  lastFiredAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, minutesBefore])
+  @@index([userId])
+  @@index([taskId])
+}
+
+// ─────────────────────────────────────────
+// PHONE CALL LOG
+// ─────────────────────────────────────────
+
+model PhoneCallLog {
+  id          String     @id @default(uuid())
+  userId      String
+  taskId      String?
+  phoneNumber String
+  twilioCallSid String?
+  status      CallStatus @default(QUEUED)
+  duration    Int?       // seconds
+  message     String?    @db.Text
+  scheduledAt DateTime
+  initiatedAt DateTime?
+  completedAt DateTime?
+  failureReason String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([scheduledAt])
+}
+
+// ─────────────────────────────────────────
+// USER PREFERENCES
+// ─────────────────────────────────────────
+
+model UserPreference {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  timezone              String   @default("Asia/Kolkata")
+  language              String   @default("en")
+  theme                 String   @default("dark")
+  dailyBriefingTime     String   @default("08:00")
+  eveningBriefingTime   String   @default("20:00")
+  notificationsEnabled  Boolean  @default(true)
+  pushWebEnabled        Boolean  @default(true)
+  pushAndroidEnabled    Boolean  @default(true)
+  phoneCallsEnabled     Boolean  @default(false)
+  phoneNumber           String?
+  phoneVerified         Boolean  @default(false)
+  callCategories        TaskCategory[]
+  preferredCallTime     String?  // "09:00-21:00"
+  erpMonitoringEnabled  Boolean  @default(true)
+  gmailSyncEnabled      Boolean  @default(true)
+  gmailSyncInterval     Int      @default(15) // minutes
+  webPushSubscription   Json?
+  fcmToken              String?
+  defaultReminderTimes  Int[]    @default([1440, 60, 30]) // minutes before: 1 day, 1 hr, 30 min
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────
+// SYNCHRONIZATION LOG
+// ─────────────────────────────────────────
+
+model SynchronizationLog {
+  id          String     @id @default(uuid())
+  userId      String
+  service     String     // "ERP" | "GMAIL" | "NOTIFICATIONS"
+  status      SyncStatus
+  startedAt   DateTime
+  completedAt DateTime?
+  itemsFound  Int        @default(0)
+  itemsNew    Int        @default(0)
+  itemsUpdated Int       @default(0)
+  errorMessage String?   @db.Text
+  metadata    Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([service])
+  @@index([startedAt])
+}
+
+model TelegramSubscription {
+  id                String   @id @default(uuid())
+  userId            String
+  telegramChatId    String
+  telegramUsername  String?
+  isEnabled         Boolean  @default(true)
+  linkedAt          DateTime @default(now())
+  lastMessageAt     DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, telegramChatId])
+  @@index([userId])
+}
+
+model TelegramLinkToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

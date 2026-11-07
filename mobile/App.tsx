@@ -1,0 +1,13 @@
+import React, { useEffect } from 'react';
+import { AppNavigator } from './src/navigation/AppNavigator';
+import * as SplashScreen from 'expo-splash-screen';
+
+SplashScreen.preventAutoHideAsync();
+
+export default function App() {
+  useEffect(() => {
+    SplashScreen.hideAsync();
+  }, []);
+
+  return <AppNavigator />;
+}
