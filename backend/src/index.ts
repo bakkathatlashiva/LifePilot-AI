@@ -1,6 +1,6 @@
 // backend/src/index.ts
 import 'dotenv/config';
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -97,7 +97,7 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get(['/health', '/api/health'], async (req, res) => {
+app.get(['/health', '/api/health'], async (req: Request, res: Response) => {
   const valkeyHealthy = await valkeyCache.isHealthy().catch(() => false);
   res.json({
     status: 'ok',
