@@ -24,6 +24,9 @@ import { signAccessToken, signRefreshToken } from '../utils/jwt';
 import { valkeyCache, valkeyClient } from '../config/valkey';
 
 export async function devLogin(req: Request, res: Response) {
+  if (env.NODE_ENV === 'production') {
+    return sendError(res, 'Development login is disabled in production', 403);
+  }
   try {
     const email = req.body.email || 'demo@lifepilot.ai';
     const name = req.body.name || 'Demo User';

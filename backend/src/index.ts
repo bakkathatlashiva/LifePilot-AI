@@ -37,6 +37,11 @@ app.use(cors({
     // Allow non-browser clients (e.g. mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
 
+    const customOrigins = (process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     const allowed = [
       env.FRONTEND_URL,
       'http://localhost:5173',
@@ -44,7 +49,10 @@ app.use(cors({
       'http://10.10.6.137:5173',
       'http://10.10.6.137:3000',
       'exp://localhost:8081',
+      ...customOrigins,
     ];
+
+    const isVercelDomain = origin.endsWith('.vercel.app');
 
     const isLocalOrLan =
       origin.startsWith('http://localhost:') ||
@@ -56,7 +64,7 @@ app.use(cors({
       origin.includes('ngrok') ||
       origin.includes('.loca.lt');
 
-    if (allowed.includes(origin) || (env.NODE_ENV !== 'production' && isLocalOrLan)) {
+    if (allowed.includes(origin) || isVercelDomain || (env.NODE_ENV !== 'production' && isLocalOrLan)) {
       callback(null, true);
     } else {
       callback(new Error(`CORS: ${origin} not allowed`));
@@ -89,7 +97,7 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/health', async (req, res) => {
+app.get(['/health', '/api/health'], async (req, res) => {
   const valkeyHealthy = await valkeyCache.isHealthy().catch(() => false);
   res.json({
     status: 'ok',

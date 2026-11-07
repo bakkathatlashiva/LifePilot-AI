@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode, useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { useAuthStore } from '../../store/authStore';
 import { useNotificationStore } from '../../store/notificationStore';
@@ -80,7 +80,7 @@ export function AppLayout() {
   }, [isAuthenticated, fetchNotifications]);
 
   if (isLoading) return <PageLoader label="Loading LifePilot AI..." />;
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return (
     <div className="flex min-h-screen bg-dark-950">

@@ -273,8 +273,8 @@ async function scrapeAssignments(
       await page.click('button[type="submit"]');
 
       await Promise.race([
-        page.waitForURL((url) => !url.href.includes("login"), { timeout: 10000 }),
-        page.waitForSelector(".dashboard, .navbar, #content, [class*='assessment'], table", { timeout: 10000 }),
+        page.waitForURL((url) => !url.href.includes("login"), { timeout: 12000 }),
+        page.waitForSelector(".dashboard, .navbar, #content, [class*='assessment'], table", { timeout: 12000 }),
       ]).catch(() => {});
 
       const stillLogin =
@@ -282,7 +282,14 @@ async function scrapeAssignments(
         (await page.$("#credential")) !== null;
 
       if (stillLogin) {
-        throw new Error(`Failed to log in to Aurora ERP for ${loginUser}. Please check credentials.`);
+        const portalError = await page.evaluate(() => {
+          const text = document.body.innerText || '';
+          if (text.includes('Unable to connect to the backend')) {
+            return 'Aurora University portal backend is temporarily unreachable (admissionsserver.aurora.edu.in down).';
+          }
+          return null;
+        }).catch(() => null);
+        throw new Error(portalError || `Failed to log in to Aurora ERP for ${loginUser}. Please check credentials.`);
       }
 
       // Save fresh cookies to DB while retaining student credentials
@@ -750,13 +757,24 @@ export async function authenticateAndSyncWithCredentials(
     await page.click('button[type="submit"]');
 
     await Promise.race([
-      page.waitForURL((url) => !url.href.includes('login'), { timeout: 8000 }),
-      page.waitForSelector('.dashboard, .navbar, #content, [class*="assessment"], table', { timeout: 8000 }),
+      page.waitForURL((url) => !url.href.includes('login'), { timeout: 12000 }),
+      page.waitForSelector('.dashboard, .navbar, #content, [class*="assessment"], table', { timeout: 12000 }),
     ]).catch(() => {});
 
     const isStillOnLogin = page.url().includes('login') || (await page.$('#credential')) !== null;
     if (isStillOnLogin) {
-      throw new Error('Invalid ERP credentials. Please check your Student User ID and Password.');
+      const portalError = await page.evaluate(() => {
+        const text = document.body.innerText || '';
+        if (text.includes('Unable to connect to the backend')) {
+          return 'Aurora University ERP portal backend is temporarily unreachable (admissionsserver.aurora.edu.in is offline). Please try again in a few minutes or use Session Cookies.';
+        }
+        if (text.toLowerCase().includes('invalid') || text.toLowerCase().includes('wrong password') || text.toLowerCase().includes('incorrect')) {
+          return 'Invalid ERP credentials. Please check your Student User ID and Password.';
+        }
+        return null;
+      }).catch(() => null);
+
+      throw new Error(portalError || 'Failed to authenticate with Aurora ERP. Please check your credentials or try again.');
     }
 
     const cookies = await context.cookies();
