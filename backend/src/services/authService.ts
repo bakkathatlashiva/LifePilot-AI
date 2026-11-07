@@ -24,7 +24,12 @@ export function isAllowedRedirect(urlStr: string): boolean {
     }
 
     const frontendUrl = new URL(env.FRONTEND_URL);
-    if (parsed.origin === frontendUrl.origin) {
+    if (
+      parsed.origin === frontendUrl.origin ||
+      parsed.hostname === 'lifepilot-ai-web.onrender.com' ||
+      parsed.hostname.endsWith('.vercel.app') ||
+      parsed.hostname.endsWith('.tmp.now')
+    ) {
       return true;
     }
 

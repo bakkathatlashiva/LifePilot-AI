@@ -52,7 +52,8 @@ app.use(cors({
       ...customOrigins,
     ];
 
-    const isVercelDomain = origin.endsWith('.vercel.app');
+    const isVercelDomain = origin.endsWith('.vercel.app') || origin.endsWith('.tmp.now');
+    const isRenderDomain = origin.endsWith('.onrender.com');
 
     const isLocalOrLan =
       origin.startsWith('http://localhost:') ||
@@ -64,7 +65,7 @@ app.use(cors({
       origin.includes('ngrok') ||
       origin.includes('.loca.lt');
 
-    if (allowed.includes(origin) || isVercelDomain || (env.NODE_ENV !== 'production' && isLocalOrLan)) {
+    if (allowed.includes(origin) || isVercelDomain || isRenderDomain || (env.NODE_ENV !== 'production' && isLocalOrLan)) {
       callback(null, true);
     } else {
       callback(new Error(`CORS: ${origin} not allowed`));
