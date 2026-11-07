@@ -52,15 +52,25 @@ if %ERRORLEVEL% EQU 0 (
 :: 4. Frontend (port 5173)
 call :CheckPort 5173
 if %ERRORLEVEL% EQU 0 (
-    echo [4/4] Starting Web Frontend on port 5173...
+    echo [4/5] Starting Web Frontend on port 5173...
     start "LifePilot - Frontend" cmd /k "cd /d D:\Projects && npm run dev --workspace=web -- --host --strictPort"
 ) else (
-    echo [4/4] Frontend already running on port 5173. Skipping start.
+    echo [4/5] Frontend already running on port 5173. Skipping start.
+)
+
+:: 5. Mobile App (Expo port 8081)
+call :CheckPort 8081
+if %ERRORLEVEL% EQU 0 (
+    echo [5/5] Starting Mobile Expo on port 8081...
+    start "LifePilot - Mobile" cmd /k "cd /d D:\Projects\mobile && npm run start"
+) else (
+    echo [5/5] Mobile Expo already running on port 8081. Skipping start.
 )
 
 echo ========================================================
 echo  All LifePilot AI services launched!
 echo  Web Frontend: http://localhost:5173
 echo  Backend API:  http://localhost:3001
+echo  Mobile Metro: http://localhost:8081 (press 'w' for web)
 echo ========================================================
 pause
