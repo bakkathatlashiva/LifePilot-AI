@@ -2,7 +2,20 @@ import crypto from 'crypto';
 import { env } from '../config/env';
 
 const ALGORITHM = 'aes-256-gcm';
-const KEY = Buffer.from(env.ENCRYPTION_KEY, 'hex'); // must be 32 bytes
+
+// Derive a guaranteed 32-byte (256-bit) key for aes-256-gcm
+function getEncryptionKey(): Buffer {
+  const rawKey = env.ENCRYPTION_KEY || 'lifepilot-default-secret-encryption-key-32b';
+  if (/^[0-9a-fA-F]{64}$/.test(rawKey)) {
+    return Buffer.from(rawKey, 'hex');
+  }
+  if (Buffer.byteLength(rawKey, 'utf8') === 32) {
+    return Buffer.from(rawKey, 'utf8');
+  }
+  return crypto.createHash('sha256').update(rawKey).digest();
+}
+
+const KEY = getEncryptionKey();
 
 export function encrypt(text: string): string {
   const iv = crypto.randomBytes(16);

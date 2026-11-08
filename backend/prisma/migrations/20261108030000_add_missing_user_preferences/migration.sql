@@ -7,3 +7,4 @@ ALTER TABLE "UserPreference" ADD COLUMN IF NOT EXISTS "emailMinPriority" "TaskPr
 ALTER TABLE "UserPreference" ADD COLUMN IF NOT EXISTS "emailNotificationsEnabled" BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE "UserPreference" ADD COLUMN IF NOT EXISTS "smsMinPriority" "TaskPriority" NOT NULL DEFAULT 'HIGH';
 ALTER TABLE "UserPreference" ADD COLUMN IF NOT EXISTS "smsNotificationsEnabled" BOOLEAN NOT NULL DEFAULT true;
+

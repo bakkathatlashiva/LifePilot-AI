@@ -27,9 +27,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initialize: async () => {
     set({ isLoading: true });
     try {
-      const token = await SecureStore.getItemAsync('accessToken');
+      // Race SecureStore query with a 2-second timeout so app never hangs indefinitely
+      const token = await Promise.race([
+        SecureStore.getItemAsync('accessToken'),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+      ]);
+
       if (token) {
-        await get().loadProfile();
+        // Race profile fetch with a 3.5-second timeout
+        await Promise.race([
+          get().loadProfile(),
+          new Promise<void>((resolve) => setTimeout(() => resolve(), 3500)),
+        ]);
       }
     } catch {
       set({ isAuthenticated: false });
