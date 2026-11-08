@@ -17,7 +17,8 @@
  * This module NEVER bypasses CAPTCHA, MFA, or access controls.
  */
 
-if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
+// Only set PLAYWRIGHT_BROWSERS_PATH='0' on Linux/Render when not running locally on Windows
+if (process.platform !== 'win32' && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
   process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 }
 
