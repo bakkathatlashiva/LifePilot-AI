@@ -100,12 +100,12 @@ export function ERPPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-white">ERP Assignments</h1>
           <p className="text-slate-500 text-sm mt-1">Aurora University · Assessment Portal</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={() => setShowSetup(true)} leftIcon={<Settings className="w-4 h-4" />}>
             Setup
           </Button>
@@ -237,7 +237,7 @@ export function ERPPage() {
 
       {/* Filter Tabs */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex gap-1 bg-dark-900 border border-white/10 rounded-2xl p-1">
+        <div className="flex gap-1 bg-dark-900 border border-white/10 rounded-2xl p-1 overflow-x-auto max-w-full">
           <button
             onClick={() => handleFilterChange('ALL')}
             className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${

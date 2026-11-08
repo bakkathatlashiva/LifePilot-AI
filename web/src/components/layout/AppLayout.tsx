@@ -1,9 +1,11 @@
-import React, { Component, ErrorInfo, ReactNode, useEffect } from 'react';
-import { Outlet, useNavigate, Navigate } from 'react-router-dom';
+import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
+import { Outlet, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { Menu, Zap, User2 } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { useAuthStore } from '../../store/authStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { PageLoader } from '../ui/LoadingSpinner';
+import { cn } from '../../lib/utils';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -56,9 +58,12 @@ class PageErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
 }
 
 export function AppLayout() {
-  const { isAuthenticated, isLoading, loadProfile } = useAuthStore();
-  const { fetchNotifications } = useNotificationStore();
+  const { isAuthenticated, isLoading, loadProfile, user } = useAuthStore();
+  const { fetchNotifications, unreadCount } = useNotificationStore();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     loadProfile();
@@ -69,6 +74,11 @@ export function AppLayout() {
       navigate('/login');
     }
   }, [isAuthenticated, isLoading, navigate]);
+
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -83,10 +93,66 @@ export function AppLayout() {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return (
-    <div className="flex min-h-screen bg-dark-950">
-      <Sidebar />
-      <main className="flex-1 ml-64 transition-all duration-300 min-h-screen overflow-auto">
-        <div className="max-w-7xl mx-auto p-6">
+    <div className="min-h-screen bg-dark-950 text-slate-100 flex flex-col md:flex-row">
+      {/* Mobile Top Header */}
+      <header className="md:hidden fixed top-0 left-0 right-0 h-14 bg-dark-900/95 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-4 z-40">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="p-2 -ml-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-bold text-sm text-white">LifePilot AI</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <span className="bg-red-500/20 border border-red-500/30 text-red-400 text-xs px-2 py-0.5 rounded-full font-bold">
+              {unreadCount}
+            </span>
+          )}
+          {user?.profilePicture ? (
+            <img src={user.profilePicture} alt={user.name} className="w-7 h-7 rounded-full ring-1 ring-purple-500/40" />
+          ) : (
+            <div className="w-7 h-7 rounded-full bg-purple-600/30 flex items-center justify-center">
+              <User2 className="w-3.5 h-3.5 text-purple-400" />
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Backdrop overlay for mobile drawer */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-45 md:hidden transition-opacity"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      {/* Responsive Sidebar */}
+      <Sidebar
+        mobileOpen={mobileOpen}
+        onCloseMobile={() => setMobileOpen(false)}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed(!collapsed)}
+      />
+
+      {/* Main Content Area */}
+      <main
+        className={cn(
+          'flex-1 min-h-screen transition-all duration-300 overflow-x-hidden',
+          'pt-16 md:pt-0',
+          collapsed ? 'md:ml-16' : 'md:ml-64'
+        )}
+      >
+        <div className="max-w-7xl mx-auto p-4 md:p-6">
           <PageErrorBoundary>
             <Outlet />
           </PageErrorBoundary>

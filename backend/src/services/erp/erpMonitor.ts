@@ -58,6 +58,8 @@ export async function runERPSync(
     where: { id: erpConnectionId },
     data: { lastSyncStatus: "RUNNING", lastSyncError: null },
   });
+  await valkeyCache.delPattern('valkey:erp:*');
+  await valkeyCache.del(`valkey:stats:${connection.userId}`).catch(() => {});
 
   const syncLog = await prisma.synchronizationLog.create({
     data: {
@@ -199,6 +201,79 @@ function parseStoredSession(sessionCookiesEncrypted: string | null): {
   return { cookies: [], credentials: null };
 }
 
+/**
+ * Helper to perform robust and fast Aurora ERP login.
+ * Listens directly to Aurora's auth API for immediate (< 2-3s) verification.
+ */
+async function performAuroraLogin(page: Page, user: string, pass: string): Promise<boolean> {
+  const trimmedUser = user.trim();
+  const cleanUser = trimmedUser.includes('@') ? trimmedUser : trimmedUser.toUpperCase();
+  const cleanPass = pass.trim();
+
+  logger.info(`[ERP Login] Attempting login for ${cleanUser}...`);
+
+  if (!page.url().includes('login')) {
+    await page.goto('https://admissions.aurora.edu.in/login', {
+      waitUntil: 'domcontentloaded',
+      timeout: 25000,
+    });
+  }
+
+  await page.waitForSelector('#credential', { timeout: 12000 });
+  await page.fill('#credential', cleanUser);
+  await page.fill('#password', cleanPass);
+
+  // Set up response listener directly for Aurora auth API
+  const authResponsePromise = page.waitForResponse(
+    (res) => res.url().includes('/api/auth/login'),
+    { timeout: 12000 }
+  ).catch(() => null);
+
+  await page.click('button[type="submit"]');
+
+  const authRes = await authResponsePromise;
+  if (authRes) {
+    const status = authRes.status();
+    logger.info(`[ERP Login] Auth API response status: ${status}`);
+
+    if (status === 200) {
+      // Login successful! Allow brief pause for cookies to register in context
+      await page.waitForTimeout(1000);
+      return true;
+    }
+
+    if (status === 401 || status === 400) {
+      const data = await authRes.json().catch(() => null);
+      const msg = data?.error || data?.message || 'Invalid ERP credentials. Please check your Student User ID and Password.';
+      throw new Error(msg);
+    }
+  }
+
+  // Fallback if response wasn't intercepted: check page innerText for messages
+  await page.waitForTimeout(1500);
+  const pageText = await page.evaluate(() => document.body.innerText || '').catch(() => '');
+
+  if (pageText.toLowerCase().includes('invalid credential') || pageText.toLowerCase().includes('wrong password') || pageText.toLowerCase().includes('incorrect')) {
+    throw new Error('Invalid ERP credentials. Please check your Student User ID and Password.');
+  }
+
+  if (pageText.includes('Unable to connect to the backend')) {
+    throw new Error('Aurora University portal backend is temporarily unreachable. Please try again.');
+  }
+
+  if (!page.url().includes('login')) {
+    return true;
+  }
+
+  const cookies = await page.context().cookies();
+  const hasAuthCookie = cookies.some((c) => c.name.includes('token') || c.name.includes('session') || c.name.includes('connect.sid'));
+  if (hasAuthCookie) {
+    return true;
+  }
+
+  throw new Error('Failed to authenticate with Aurora ERP. Please check your credentials or try again.');
+}
+
 async function scrapeAssignments(
   connection: {
     id: string;
@@ -228,6 +303,8 @@ async function scrapeAssignments(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 720 },
       locale: 'en-US',
+      permissions: ['geolocation'],
+      geolocation: { latitude: 17.3850, longitude: 78.4867 },
     });
 
     await context.addInitScript(() => {
@@ -266,35 +343,7 @@ async function scrapeAssignments(
 
     if (isLogin) {
       logger.info(`[ERP] Session expired or fresh login needed. Logging in as ${loginUser}...`);
-      if (!page.url().includes("login")) {
-        await page.goto("https://admissions.aurora.edu.in/login", {
-          waitUntil: "domcontentloaded",
-          timeout: 25000,
-        });
-      }
-      await page.fill("#credential", loginUser);
-      await page.fill("#password", loginPass);
-      await page.click('button[type="submit"]');
-
-      await Promise.race([
-        page.waitForURL((url) => !url.href.includes("login"), { timeout: 12000 }),
-        page.waitForSelector(".dashboard, .navbar, #content, [class*='assessment'], table", { timeout: 12000 }),
-      ]).catch(() => {});
-
-      const stillLogin =
-        page.url().includes("login") ||
-        (await page.$("#credential")) !== null;
-
-      if (stillLogin) {
-        const portalError = await page.evaluate(() => {
-          const text = document.body.innerText || '';
-          if (text.includes('Unable to connect to the backend')) {
-            return 'Aurora University portal backend is temporarily unreachable (admissionsserver.aurora.edu.in down).';
-          }
-          return null;
-        }).catch(() => null);
-        throw new Error(portalError || `Failed to log in to Aurora ERP for ${loginUser}. Please check credentials.`);
-      }
+      await performAuroraLogin(page, loginUser, loginPass);
 
       // Save fresh cookies to DB while retaining student credentials
       const freshCookies = await context.cookies();
@@ -751,6 +800,8 @@ export async function authenticateAndSyncWithCredentials(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 720 },
       locale: 'en-US',
+      permissions: ['geolocation'],
+      geolocation: { latitude: 17.3850, longitude: 78.4867 },
     });
 
     await context.addInitScript(() => {
@@ -759,41 +810,10 @@ export async function authenticateAndSyncWithCredentials(
 
     const page = await context.newPage();
 
-    await page.goto('https://admissions.aurora.edu.in/login', { waitUntil: 'domcontentloaded', timeout: 25000 });
-    const trimmedUser = username.trim();
-    // Support both Student Roll Numbers (252U1R9175) and Email addresses (student@aurora.edu.in)
-    const cleanUser = trimmedUser.includes('@') ? trimmedUser : trimmedUser.toUpperCase();
-    const cleanPass = password.trim();
-    await page.fill('#credential', cleanUser);
-    await page.fill('#password', cleanPass);
-    await page.click('button[type="submit"]');
+    // Verify credentials via fast direct API response detection (< 2-3s)
+    await performAuroraLogin(page, username, password);
 
-    // Wait for either navigation away from login or an error message to appear
-    await Promise.race([
-      page.waitForURL((url) => !url.href.includes('login'), { timeout: 15000 }),
-      page.waitForSelector('.dashboard, .navbar, #content, [class*="assessment"], table', { timeout: 15000 }),
-      page.waitForFunction(() => {
-        const text = document.body.innerText || '';
-        return text.includes('Invalid credentials') || text.includes('Unable to connect');
-      }, { timeout: 8000 }),
-    ]).catch(() => {});
-
-    const isStillOnLogin = page.url().includes('login') || (await page.$('#credential')) !== null;
-    if (isStillOnLogin) {
-      const portalError = await page.evaluate(() => {
-        const text = document.body.innerText || '';
-        if (text.toLowerCase().includes('invalid') || text.toLowerCase().includes('wrong password') || text.toLowerCase().includes('incorrect')) {
-          return 'Invalid ERP credentials. Please check your Student User ID and Password.';
-        }
-        if (text.includes('Unable to connect to the backend')) {
-          return 'Aurora University ERP portal backend is temporarily unreachable. Please try again.';
-        }
-        return null;
-      }).catch(() => null);
-
-      throw new Error(portalError || 'Failed to authenticate with Aurora ERP. Please check your credentials or try again.');
-    }
-
+    // Capture authenticated session cookies
     const cookies = await context.cookies();
     const connectionId = await saveERPSession(userId, erpUrl, cookies, { username, password });
 
@@ -810,33 +830,25 @@ export async function authenticateAndSyncWithCredentials(
     await valkeyCache.delPattern('valkey:erp:*');
     await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
 
-    // Navigate directly to assessments and scrape immediately on current authenticated session
-    logger.info(`[ERP] Immediate live scrape on authenticated session for ${username}...`);
-    await page.goto(erpUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-
-    const assignments = await extractAssignmentsFromPage(page);
-    let newCount = 0;
-    if (assignments.length > 0) {
-      const res = await processAssignments(userId, connectionId, assignments);
-      newCount = res.newCount;
-    }
-
+    // Set connection status to RUNNING so the UI immediately shows live sync progress
     await prisma.eRPConnection.update({
       where: { id: connectionId },
       data: {
-        lastSyncStatus: 'SUCCESS',
-        lastSyncAt: new Date(),
+        lastSyncStatus: 'RUNNING',
         lastSyncError: null,
       },
     });
 
-    await valkeyCache.delPattern('valkey:erp:*');
-    await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
-
+    // Close the verification browser instance immediately to free resources
     await browser.close();
 
-    logger.info(`[ERP] Connected and live-synced ${assignments.length} assignments for ${username}.`);
-    return { connectionId, assignmentCount: assignments.length };
+    // Trigger full course assessment extraction asynchronously in background
+    logger.info(`[ERP] Verified credentials in ~3s. Triggering background course sync for ${username}...`);
+    runERPSync(connectionId, { username, password }).catch((err) => {
+      logger.error('[ERP Background Sync] Error:', err);
+    });
+
+    return { connectionId, assignmentCount: 0 };
   } catch (err) {
     if (browser) {
       try { await browser.close(); } catch {}
