@@ -386,6 +386,63 @@ async function scrapeAssignments(
 async function extractAssignmentsFromPage(
   page: Page,
 ): Promise<ERPAssignmentData[]> {
+  // Strategy 1: Direct in-portal official API extraction (fast, 100% comprehensive, authoritative)
+  try {
+    logger.info('[ERP] Attempting direct student-portal API extraction...');
+    const apiRes: any = await page.evaluate(async () => {
+      try {
+        const res = await fetch('https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments', {
+          credentials: 'include'
+        });
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    });
+
+    if (apiRes?.data && Array.isArray(apiRes.data) && apiRes.data.length > 0) {
+      const rawItems = apiRes.data;
+      logger.info(`[ERP] Direct API returned ${rawItems.length} total assessment items`);
+
+      const assignments: ERPAssignmentData[] = [];
+      for (const it of rawItems) {
+        const cStatus = (it.computedStatus || it.status || '').toUpperCase();
+        // Hide upcoming until they become ongoing / assigned
+        if (cStatus === 'UPCOMING') continue;
+
+        const subjectName = it.subject?.name || 'Enrolled Course';
+        const subjectCode = it.subject?.code || 'COURSE';
+        const subject = `${subjectName} (${subjectCode})`;
+
+        const marksObtained = it.submission?.marksObtained ?? it.quizAttempt?.score;
+        const marksText = marksObtained !== null && marksObtained !== undefined
+          ? `Scored: ${marksObtained}/${it.maxMarks}`
+          : `Max Marks: ${it.maxMarks ?? 'N/A'}`;
+
+        const status: AssignmentStatus = (cStatus === 'ACTIVE' || cStatus === 'ONGOING') ? 'AVAILABLE' : 'CLOSED';
+
+        assignments.push({
+          erpId: it.id || `${subjectCode}_${slugify(it.title)}`,
+          title: it.title,
+          subject,
+          description: `Type: ${it.type || it.method || 'Assessment'}\n${marksText}\nStatus: ${cStatus}`,
+          openingDate: parseDate(it.opensAt || it.submissionStartDate) ?? undefined,
+          closingDate: parseDate(it.dueDate) ?? undefined,
+          status,
+          maxMarks: it.maxMarks,
+          rawData: it,
+        });
+      }
+
+      logger.info(`[ERP] Successfully parsed ${assignments.length} ongoing/submitted/evaluated assignments from official API`);
+      return assignments;
+    }
+  } catch (apiErr) {
+    logger.warn('[ERP] Direct API extraction failed, falling back to DOM scraper:', apiErr);
+  }
+
+  // Strategy 2: Fallback DOM Scraping
   const assignmentsMap = new Map<string, ERPAssignmentData>();
 
   async function scrapeCurrentTermCards(termLabel: string) {
@@ -831,25 +888,33 @@ export async function authenticateAndSyncWithCredentials(
     await valkeyCache.delPattern('valkey:erp:*');
     await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
 
-    // Set connection status to RUNNING so the UI immediately shows live sync progress
+    // Extract assignments immediately using the open session (< 1s via direct API)
+    logger.info(`[ERP] Fetching assessments for ${username}...`);
+    const assignments = await extractAssignmentsFromPage(page);
+
+    let newCount = 0;
+    if (assignments.length > 0) {
+      const res = await processAssignments(userId, connectionId, assignments);
+      newCount = res.newCount;
+    }
+
     await prisma.eRPConnection.update({
       where: { id: connectionId },
       data: {
-        lastSyncStatus: 'RUNNING',
+        lastSyncStatus: 'SUCCESS',
+        lastSyncAt: new Date(),
         lastSyncError: null,
       },
     });
 
-    // Close the verification browser instance immediately to free resources
+    await valkeyCache.delPattern('valkey:erp:*');
+    await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
+
+    // Close the browser instance immediately
     await browser.close();
 
-    // Trigger full course assessment extraction asynchronously in background
-    logger.info(`[ERP] Verified credentials in ~3s. Triggering background course sync for ${username}...`);
-    runERPSync(connectionId, { username, password }).catch((err) => {
-      logger.error('[ERP Background Sync] Error:', err);
-    });
-
-    return { connectionId, assignmentCount: 0 };
+    logger.info(`[ERP] Connected and live-synced ${assignments.length} assignments for ${username}.`);
+    return { connectionId, assignmentCount: assignments.length };
   } catch (err) {
     if (browser) {
       try { await browser.close(); } catch {}
