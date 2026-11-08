@@ -28,8 +28,8 @@ export async function devLogin(req: Request, res: Response) {
     return sendError(res, 'Development login is disabled in production', 403);
   }
   try {
-    const email = req.body.email || 'demo@lifepilot.ai';
-    const name = req.body.name || 'Demo User';
+    const email = req.body.email || 'bakkathatlashiva@gmail.com';
+    const name = req.body.name || 'Shiva Bakkathatla';
 
     let user = await prisma.user.findUnique({
       where: { email },

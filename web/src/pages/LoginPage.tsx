@@ -30,6 +30,31 @@ export function LoginPage() {
     window.location.href = `${API_BASE_URL}/auth/google?returnTo=${returnTo}`;
   };
 
+  const [devLoading, setDevLoading] = React.useState(false);
+  const isLocalhost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.startsWith('192.168.'));
+
+  const handleDevLogin = async () => {
+    setDevLoading(true);
+    try {
+      const res = await api.post('/auth/dev-login', {
+        email: 'bakkathatlashiva@gmail.com',
+        name: 'Shiva Bakkathatla',
+      });
+      const { accessToken, refreshToken } = res.data.data;
+      setTokens(accessToken, refreshToken);
+      await loadProfile();
+      navigate('/dashboard');
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Dev login failed');
+    } finally {
+      setDevLoading(false);
+    }
+  };
+
   const features = [
     { icon: <Bell className="w-5 h-5" />, text: 'Auto-detect ERP assignments & notify you instantly' },
     { icon: <Zap className="w-5 h-5" />, text: 'AI analysis of your academic emails for important notices' },
@@ -119,6 +144,18 @@ export function LoginPage() {
             </svg>
             <span className="text-[15px]">Continue with Google</span>
           </button>
+
+          {isLocalhost && (
+            <button
+              onClick={handleDevLogin}
+              disabled={devLoading}
+              className="mt-3 w-full flex items-center justify-center gap-2.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/30
+                         font-medium px-6 py-3 rounded-2xl transition-all duration-200 active:scale-[0.98] cursor-pointer text-sm"
+            >
+              <Zap className="w-4 h-4 text-purple-400" />
+              <span>{devLoading ? 'Signing in...' : '⚡ Quick Dev Sign In (Shiva)'}</span>
+            </button>
+          )}
 
           <p className="text-center text-xs text-slate-500 mt-3">
             Fast, secure single sign-on using Google OAuth 2.0
