@@ -409,10 +409,8 @@ function AssignmentDetail({ assignment: a }: { assignment: ERPAssignment }) {
 }
 
 function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
-  const [tab, setTab] = useState<'credentials' | 'cookies'>('credentials');
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState('252U1R9175');
   const [password, setPassword] = useState('');
-  const [cookieJson, setCookieJson] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -448,135 +446,42 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
     }
   };
 
-  const handleSaveCookies = async () => {
-    if (!cookieJson.trim()) {
-      setError('Paste your session cookies');
-      return;
-    }
-    let parsed: any[] = [];
-    const text = cookieJson.trim();
-    if (text.startsWith('[') || text.startsWith('{')) {
-      try {
-        const json = JSON.parse(text);
-        parsed = Array.isArray(json) ? json : (json.cookies || [json]);
-      } catch {
-        setError('Invalid JSON format');
-        return;
-      }
-    } else {
-      // Support raw cookie string: "name1=val1; name2=val2"
-      parsed = text
-        .split(';')
-        .map((part) => {
-          const [name, ...valParts] = part.trim().split('=');
-          return {
-            name: name?.trim() || '',
-            value: valParts.join('=').trim(),
-            domain: 'admissions.aurora.edu.in',
-            path: '/',
-          };
-        })
-        .filter((c) => c.name && c.value);
-    }
-
-    if (!parsed || parsed.length === 0) {
-      setError('No valid cookies found. Please paste either cookie string or JSON.');
-      return;
-    }
-
-    setSaving(true);
-    setError('');
-    try {
-      await api.post('/erp/session', { cookies: parsed });
-      onSuccess();
-    } catch (e: any) {
-      setError(e.response?.data?.message ?? 'Failed to save session');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div className="space-y-5">
-      <div className="flex border-b border-white/10 gap-4">
-        <button
-          type="button"
-          onClick={() => setTab('credentials')}
-          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'credentials' ? 'border-purple-500 text-purple-400 font-semibold' : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          Student Credentials (Automated)
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('cookies')}
-          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'cookies' ? 'border-purple-500 text-purple-400 font-semibold' : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          Session Cookies (Manual)
-        </button>
-      </div>
-
-      {tab === 'credentials' ? (
-        <form onSubmit={handleCredentialsLogin} className="space-y-4">
-          <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
-            <p className="text-purple-300 font-medium text-sm mb-1">Direct Student Portal Authentication</p>
-            <p className="text-purple-200/70 text-xs leading-relaxed">
-              Enter your Aurora ERP credentials. LifePilot verifies your account at admissions.aurora.edu.in, encrypts your session, and starts automated background monitoring across all enrolled subjects.
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">Student User ID / Email / Hall Ticket</label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              placeholder="Enter Student ID / Roll Number or Email"
-              className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60 font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Enter your ERP portal password"
-              className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60"
-            />
-            <p className="text-[11px] text-slate-400 mt-1">Supports Student Roll Number or Registered Email Address · Password is case-sensitive.</p>
-          </div>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          {successMsg && <p className="text-emerald-400 text-sm">{successMsg}</p>}
-          <Button type="submit" loading={saving} className="w-full">
-            {saving ? 'Verifying Credentials...' : 'Authenticate & Sync ERP'}
-          </Button>
-        </form>
-      ) : (
-        <div className="space-y-4">
-          <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
-            <p className="text-blue-300 font-medium text-sm mb-1">Paste Aurora Session Cookies</p>
-            <p className="text-blue-200/70 text-xs leading-relaxed">
-              Log into <span className="text-white font-mono">admissions.aurora.edu.in</span> in another tab. Open Developer Tools (F12) → Console, type <code className="bg-black/30 px-1 py-0.5 rounded text-purple-300">copy(document.cookie)</code> and press Enter. Then paste the copied text here (or paste JSON format).
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">Session Cookies (String or JSON)</label>
-            <textarea
-              className="w-full bg-dark-800 border border-white/10 rounded-xl p-4 text-slate-100 text-xs font-mono focus:outline-none focus:border-purple-500/60 h-36 resize-none"
-              placeholder="Paste cookie string (e.g. session=abc; token=xyz...) or JSON array..."
-              value={cookieJson}
-              onChange={e => setCookieJson(e.target.value)}
-            />
-          </div>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          <Button onClick={handleSaveCookies} loading={saving} className="w-full">
-            Save Cookies & Start Monitoring
-          </Button>
+      <form onSubmit={handleCredentialsLogin} className="space-y-4">
+        <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
+          <p className="text-purple-300 font-medium text-sm mb-1">Direct Student Portal Authentication</p>
+          <p className="text-purple-200/70 text-xs leading-relaxed">
+            Enter your Aurora ERP credentials. LifePilot verifies your account at admissions.aurora.edu.in, encrypts your session, and starts automated background monitoring across all enrolled subjects.
+          </p>
         </div>
-      )}
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-1.5">Student User ID / Email / Hall Ticket</label>
+          <input
+            type="text"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            placeholder="Enter Student ID / Roll Number or Email"
+            className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60 font-mono"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Enter your ERP portal password"
+            className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60"
+          />
+          <p className="text-[11px] text-slate-400 mt-1">Supports Student Roll Number or Registered Email Address · Password is case-sensitive.</p>
+        </div>
+        {error && <p className="text-red-400 text-sm">{error}</p>}
+        {successMsg && <p className="text-emerald-400 text-sm">{successMsg}</p>}
+        <Button type="submit" loading={saving} className="w-full">
+          {saving ? 'Verifying Credentials...' : 'Authenticate & Sync ERP'}
+        </Button>
+      </form>
     </div>
   );
 }

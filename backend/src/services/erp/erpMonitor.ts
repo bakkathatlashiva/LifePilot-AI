@@ -214,27 +214,27 @@ async function scrapeAssignments(
     browser = await chromium.launch({
       headless: true,
       args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
       ],
     });
 
     const context = await browser.newContext({
       userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 720 },
+      locale: 'en-US',
+    });
+
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
 
     const page = await context.newPage();
-
-    // Abort unnecessary heavy network assets (images, fonts, media) to speed up scraping
-    await page.route("**/*", (route) => {
-      const type = route.request().resourceType();
-      if (["image", "media", "font"].includes(type)) {
-        return route.abort();
-      }
-      return route.continue();
-    });
 
     const storedSession = parseStoredSession(connection.sessionCookies);
     if (storedSession.cookies && storedSession.cookies.length > 0) {
@@ -735,21 +735,29 @@ export async function authenticateAndSyncWithCredentials(
   logger.info(`[ERP] Authenticating user ${userId} with ERP credentials (${username})...`);
   const browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
+    ],
   });
 
   try {
     const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 720 },
+      locale: 'en-US',
     });
-    const page = await context.newPage();
 
-    // Abort heavy assets to ensure rapid login and scraping
-    await page.route('**/*', (route) => {
-      const type = route.request().resourceType();
-      if (['image', 'media', 'font'].includes(type)) return route.abort();
-      return route.continue();
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
+
+    const page = await context.newPage();
 
     await page.goto('https://admissions.aurora.edu.in/login', { waitUntil: 'domcontentloaded', timeout: 25000 });
     const trimmedUser = username.trim();
@@ -760,20 +768,25 @@ export async function authenticateAndSyncWithCredentials(
     await page.fill('#password', cleanPass);
     await page.click('button[type="submit"]');
 
+    // Wait for either navigation away from login or an error message to appear
     await Promise.race([
-      page.waitForURL((url) => !url.href.includes('login'), { timeout: 12000 }),
-      page.waitForSelector('.dashboard, .navbar, #content, [class*="assessment"], table', { timeout: 12000 }),
+      page.waitForURL((url) => !url.href.includes('login'), { timeout: 15000 }),
+      page.waitForSelector('.dashboard, .navbar, #content, [class*="assessment"], table', { timeout: 15000 }),
+      page.waitForFunction(() => {
+        const text = document.body.innerText || '';
+        return text.includes('Invalid credentials') || text.includes('Unable to connect');
+      }, { timeout: 8000 }),
     ]).catch(() => {});
 
     const isStillOnLogin = page.url().includes('login') || (await page.$('#credential')) !== null;
     if (isStillOnLogin) {
       const portalError = await page.evaluate(() => {
         const text = document.body.innerText || '';
-        if (text.includes('Unable to connect to the backend')) {
-          return 'Aurora University ERP portal backend is temporarily unreachable (admissionsserver.aurora.edu.in is offline). Please try again in a few minutes or use Session Cookies.';
-        }
         if (text.toLowerCase().includes('invalid') || text.toLowerCase().includes('wrong password') || text.toLowerCase().includes('incorrect')) {
           return 'Invalid ERP credentials. Please check your Student User ID and Password.';
+        }
+        if (text.includes('Unable to connect to the backend')) {
+          return 'Aurora University ERP portal backend is temporarily unreachable. Please try again.';
         }
         return null;
       }).catch(() => null);
