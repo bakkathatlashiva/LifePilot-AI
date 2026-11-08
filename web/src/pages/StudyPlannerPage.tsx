@@ -65,11 +65,11 @@ export function StudyPlannerPage() {
   const totalHoursStudied = completed.reduce((acc, s) => acc + s.durationMin / 60, 0);
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Study Planner</h1>
-          <p className="text-slate-500 text-sm mt-1">Plan and track your study sessions</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Study Planner</h1>
+          <p className="text-slate-400 text-xs sm:text-sm mt-0.5">Plan and track your study sessions</p>
         </div>
         <Button onClick={() => setShowCreate(true)} leftIcon={<Plus className="w-4 h-4" />}>
           Schedule Session
@@ -77,18 +77,18 @@ export function StudyPlannerPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <p className="text-2xl font-bold text-purple-400">{upcoming.length}</p>
-          <p className="text-slate-500 text-xs mt-1">Upcoming sessions</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-4">
+        <Card padding="sm">
+          <p className="text-xl sm:text-2xl font-bold text-purple-400">{upcoming.length}</p>
+          <p className="text-slate-400 text-xs mt-0.5">Upcoming sessions</p>
         </Card>
-        <Card>
-          <p className="text-2xl font-bold text-emerald-400">{totalHoursStudied.toFixed(1)}h</p>
-          <p className="text-slate-500 text-xs mt-1">Hours studied</p>
+        <Card padding="sm">
+          <p className="text-xl sm:text-2xl font-bold text-emerald-400">{totalHoursStudied.toFixed(1)}h</p>
+          <p className="text-slate-400 text-xs mt-0.5">Hours studied</p>
         </Card>
-        <Card>
-          <p className="text-2xl font-bold text-blue-400">{exams.length}</p>
-          <p className="text-slate-500 text-xs mt-1">Upcoming exams</p>
+        <Card padding="sm">
+          <p className="text-xl sm:text-2xl font-bold text-blue-400">{exams.length}</p>
+          <p className="text-slate-400 text-xs mt-0.5">Upcoming exams</p>
         </Card>
       </div>
 

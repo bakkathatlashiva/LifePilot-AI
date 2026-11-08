@@ -8,8 +8,8 @@ import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TaskForm } from '../components/tasks/TaskForm';
-import { Task, TaskStatus, TaskCategory, TaskPriority } from '../types';
-import { formatDeadline, PRIORITY_CONFIG, STATUS_CONFIG, CATEGORY_CONFIG } from '../lib/utils';
+import { Task, TaskStatus, TaskCategory } from '../types';
+import { formatDeadline, STATUS_CONFIG, CATEGORY_CONFIG } from '../lib/utils';
 import { format } from 'date-fns';
 
 const STATUS_OPTIONS = [
@@ -51,10 +51,10 @@ export function TasksPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">My Tasks</h1>
-          <p className="text-slate-500 text-sm mt-1">{tasks.length} tasks</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">My Tasks</h1>
+          <p className="text-slate-400 text-xs sm:text-sm mt-0.5">{tasks.length} tasks</p>
         </div>
         <Button onClick={() => setShowCreate(true)} leftIcon={<Plus className="w-4 h-4" />}>
           New Task
@@ -63,8 +63,8 @@ export function TasksPage() {
 
       {/* Filters */}
       <Card padding="sm">
-        <div className="flex flex-wrap gap-3 p-2">
-          <div className="flex-1 min-w-[200px]">
+        <div className="flex flex-col sm:flex-row flex-wrap gap-2.5 sm:gap-3 p-1 sm:p-2">
+          <div className="flex-1 min-w-0 sm:min-w-[200px]">
             <Input
               placeholder="Search tasks..."
               value={search}
@@ -72,14 +72,14 @@ export function TasksPage() {
               leftIcon={<Search className="w-4 h-4" />}
             />
           </div>
-          <div className="w-44">
+          <div className="w-full sm:w-44">
             <Select
               options={STATUS_OPTIONS}
               value={filters.status ?? ''}
               onChange={(e) => setFilters({ ...filters, status: e.target.value || undefined })}
             />
           </div>
-          <div className="w-44">
+          <div className="w-full sm:w-44">
             <Select
               options={CATEGORY_OPTIONS}
               value={filters.category ?? ''}
@@ -130,7 +130,6 @@ function TaskRow({ task, onComplete, onDelete, onEdit }: {
 }) {
   const [confirming, setConfirming] = useState(false);
   const cat = CATEGORY_CONFIG[task.category];
-  const prio = PRIORITY_CONFIG[task.priority];
   const stat = STATUS_CONFIG[task.status];
   const isOverdue = task.status === 'OVERDUE';
   const isCompleted = task.status === 'COMPLETED';
@@ -145,7 +144,9 @@ function TaskRow({ task, onComplete, onDelete, onEdit }: {
 
       {/* Complete button */}
       <button
-        className={`flex-shrink-0 transition-colors ${isCompleted ? 'text-emerald-400' : 'text-slate-600 hover:text-emerald-400'}`}
+        className={`min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+          isCompleted ? 'text-emerald-400' : 'text-slate-500 hover:text-emerald-400 active:scale-90'
+        }`}
         onClick={() => !isCompleted && onComplete(task.id)}
         disabled={isCompleted}
         aria-label="Mark complete"
@@ -167,12 +168,12 @@ function TaskRow({ task, onComplete, onDelete, onEdit }: {
           </Badge>
         </div>
         {task.description && (
-          <p className="text-xs text-slate-500 mt-0.5 truncate">{task.description}</p>
+          <p className="text-xs text-slate-400 mt-0.5 truncate">{task.description}</p>
         )}
-        <div className="flex items-center gap-3 mt-1.5">
-          <span className="text-xs text-slate-500">{cat.icon} {cat.label}</span>
+        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+          <span className="text-xs text-slate-400">{cat.icon} {cat.label}</span>
           {task.deadline && (
-            <span className={`text-xs ${isOverdue ? 'text-red-400' : 'text-slate-500'}`}>
+            <span className={`text-xs ${isOverdue ? 'text-red-400 font-medium' : 'text-slate-400'}`}>
               {formatDeadline(task.deadline)}
             </span>
           )}
@@ -182,24 +183,28 @@ function TaskRow({ task, onComplete, onDelete, onEdit }: {
         </div>
       </div>
 
-      {/* Priority indicator */}
-      <div className={`w-2 h-8 rounded-full flex-shrink-0 ${prio.dot}`} />
-
-      {/* Actions */}
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button variant="ghost" size="icon" onClick={() => onEdit(task)} aria-label="Edit task">
+      {/* Actions (visible on mobile touch, hover on desktop) */}
+      <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <button
+          onClick={() => onEdit(task)}
+          aria-label="Edit task"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-white/10 rounded-xl transition"
+        >
           <Edit className="w-4 h-4" />
-        </Button>
+        </button>
         {confirming ? (
-          <div className="flex gap-1">
+          <div className="flex gap-1 items-center">
             <Button variant="danger" size="sm" onClick={() => onDelete(task.id)}>Delete</Button>
             <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
           </div>
         ) : (
-          <Button variant="ghost" size="icon" onClick={() => setConfirming(true)} aria-label="Delete task"
-            className="hover:text-red-400 hover:bg-red-500/10">
+          <button
+            onClick={() => setConfirming(true)}
+            aria-label="Delete task"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition"
+          >
             <Trash2 className="w-4 h-4" />
-          </Button>
+          </button>
         )}
       </div>
     </div>

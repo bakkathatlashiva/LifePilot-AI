@@ -11,7 +11,7 @@ import { valkeyCache } from '../config/valkey';
 const router = Router();
 router.use(requireAuth);
 
-// Get ERP connection status (with Valkey caching)
+// Get ERP connection status
 router.get('/status', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
@@ -35,7 +35,10 @@ router.get('/status', async (req: AuthRequest, res: Response) => {
     });
 
     const payload = { connection, recentLogs };
-    await valkeyCache.set(cacheKey, payload, 15); // 15-second cache for fast polling
+    // Do not cache when RUNNING so polling detects completion immediately; otherwise cache for 5s
+    if (connection?.lastSyncStatus !== 'RUNNING') {
+      await valkeyCache.set(cacheKey, payload, 5);
+    }
 
     return sendSuccess(res, payload);
   } catch (error) {
@@ -96,13 +99,10 @@ router.post('/sync', async (req: AuthRequest, res: Response) => {
 
     if (!connection) return sendError(res, 'No active ERP connection found', 404);
 
-    try {
-      await erpQueue.add('sync', { connectionId: connection.id }, { jobId: `manual-${connection.id}-${Date.now()}` });
-    } catch (qErr) {
-      logger.warn('[ERP Sync] BullMQ queue add warning:', qErr);
-    }
+    // Invalidate cached status immediately so polling sees the fresh sync state instantly
+    await valkeyCache.del(`valkey:erp:status:${req.user!.userId}`);
 
-    // Direct background execution ensures immediate sync
+    // Direct background execution ensures immediate sync without duplicate queue processing
     runERPSync(connection.id).catch((err) => logger.error('[ERP Sync] Direct run error:', err));
 
     return sendSuccess(res, null, 'ERP sync initiated.');

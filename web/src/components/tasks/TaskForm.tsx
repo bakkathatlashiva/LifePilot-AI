@@ -24,13 +24,6 @@ const CATEGORY_OPTIONS = [
   { value: 'REMINDER', label: '🔔 Reminder' },
 ];
 
-const PRIORITY_OPTIONS = [
-  { value: 'LOW', label: 'Low' },
-  { value: 'MEDIUM', label: 'Medium' },
-  { value: 'HIGH', label: 'High' },
-  { value: 'CRITICAL', label: 'Critical' },
-];
-
 export function TaskForm({ task, onSuccess }: TaskFormProps) {
   const { createTask, updateTask } = useTaskStore();
   const isEdit = !!task;
@@ -108,14 +101,14 @@ export function TaskForm({ task, onSuccess }: TaskFormProps) {
       {!isEdit && (
         <div className="p-4 bg-purple-600/10 border border-purple-500/20 rounded-2xl">
           <p className="text-sm text-purple-300 font-medium mb-2">✨ Describe your task naturally</p>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <Input
               placeholder='"Remind me tomorrow at 8pm to complete my Java project"'
               value={naturalText}
               onChange={(e) => setNaturalText(e.target.value)}
             />
             <Button type="button" onClick={parseNatural} loading={parsing}
-              variant="outline" className="flex-shrink-0"
+              variant="outline" className="flex-shrink-0 min-h-[44px]"
               leftIcon={<Wand2 className="w-4 h-4" />}>
               Parse
             </Button>
@@ -139,20 +132,12 @@ export function TaskForm({ task, onSuccess }: TaskFormProps) {
         rows={3}
       />
 
-      <div className="grid grid-cols-2 gap-4">
-        <Select
-          label="Category"
-          options={CATEGORY_OPTIONS}
-          value={form.category}
-          onChange={(e) => setForm({ ...form, category: e.target.value as any })}
-        />
-        <Select
-          label="Priority"
-          options={PRIORITY_OPTIONS}
-          value={form.priority}
-          onChange={(e) => setForm({ ...form, priority: e.target.value as any })}
-        />
-      </div>
+      <Select
+        label="Category"
+        options={CATEGORY_OPTIONS}
+        value={form.category}
+        onChange={(e) => setForm({ ...form, category: e.target.value as any })}
+      />
 
       <Input
         label="Deadline"

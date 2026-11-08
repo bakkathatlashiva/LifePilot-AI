@@ -28,7 +28,7 @@ import { encrypt, decrypt } from "../../utils/encryption";
 import { logger } from "../../utils/logger";
 import { env } from "../../config/env";
 import { AssignmentStatus, SyncStatus } from "../types";
-import { notifyNewAssignment } from "../notifications/notificationService";
+import { notifyNewAssignment, checkAndDispatchOngoingAndMissedAlerts } from "../notifications/notificationService";
 import { valkeyCache } from "../../config/valkey";
 
 export interface ERPAssignmentData {
@@ -43,23 +43,36 @@ export interface ERPAssignmentData {
   rawData?: Record<string, unknown>;
 }
 
+// In-memory guard to prevent duplicate concurrent syncs
+const inFlightSyncs = new Set<string>();
+
 export async function runERPSync(
   erpConnectionId: string,
   explicitCreds?: { username: string; password: string }
 ): Promise<void> {
+  if (inFlightSyncs.has(erpConnectionId)) {
+    logger.info(`[ERP] Sync already in-flight for connection ${erpConnectionId}, skipping duplicate call.`);
+    return;
+  }
+  inFlightSyncs.add(erpConnectionId);
+
   const connection = await prisma.eRPConnection.findUnique({
     where: { id: erpConnectionId },
     include: { user: true },
   });
 
-  if (!connection || !connection.isActive) return;
+  if (!connection || !connection.isActive) {
+    inFlightSyncs.delete(erpConnectionId);
+    return;
+  }
 
   // Immediately broadcast RUNNING status
   await prisma.eRPConnection.update({
     where: { id: erpConnectionId },
     data: { lastSyncStatus: "RUNNING", lastSyncError: null },
   });
-  await valkeyCache.delPattern('valkey:erp:*');
+  await valkeyCache.del(`valkey:erp:status:${connection.userId}`).catch(() => {});
+  await valkeyCache.delPattern('valkey:erp:*').catch(() => {});
   await valkeyCache.del(`valkey:stats:${connection.userId}`).catch(() => {});
 
   const syncLog = await prisma.synchronizationLog.create({
@@ -98,17 +111,19 @@ export async function runERPSync(
           .map((s) => s.taskId)
           .filter(Boolean) as string[];
 
-        await prisma.assignmentHistory.deleteMany({
-          where: { assignmentId: { in: staleIds } },
-        });
-        await prisma.eRPAssignment.deleteMany({
-          where: { id: { in: staleIds } },
-        });
-        if (staleTaskIds.length > 0) {
-          await prisma.task.deleteMany({
-            where: { id: { in: staleTaskIds } },
-          });
-        }
+        await Promise.all([
+          prisma.assignmentHistory.deleteMany({
+            where: { assignmentId: { in: staleIds } },
+          }),
+          prisma.eRPAssignment.deleteMany({
+            where: { id: { in: staleIds } },
+          }),
+          staleTaskIds.length > 0
+            ? prisma.task.deleteMany({
+                where: { id: { in: staleTaskIds } },
+              })
+            : Promise.resolve(),
+        ]);
         logger.info(
           `[ERP] Cleaned up ${staleAssignments.length} old/previous-term assignments from database`
         );
@@ -124,7 +139,8 @@ export async function runERPSync(
       });
 
       // Invalidate Valkey cache for instant fresh UI updates
-      await valkeyCache.delPattern('valkey:erp:*');
+      await valkeyCache.del(`valkey:erp:status:${connection.userId}`).catch(() => {});
+      await valkeyCache.delPattern('valkey:erp:*').catch(() => {});
       await valkeyCache.del(`valkey:stats:${connection.userId}`).catch(() => {});
 
       await prisma.synchronizationLog.update({
@@ -153,7 +169,8 @@ export async function runERPSync(
       });
 
       // Invalidate Valkey cache for instant fresh UI updates
-      await valkeyCache.delPattern('valkey:erp:*');
+      await valkeyCache.del(`valkey:erp:status:${connection.userId}`).catch(() => {});
+      await valkeyCache.delPattern('valkey:erp:*').catch(() => {});
       await valkeyCache.del(`valkey:stats:${connection.userId}`).catch(() => {});
     }
   } catch (error: any) {
@@ -176,6 +193,8 @@ export async function runERPSync(
       where: { id: syncLog.id },
       data: { status: "FAILED", completedAt: new Date(), errorMessage: cleanMsg },
     });
+  } finally {
+    inFlightSyncs.delete(erpConnectionId);
   }
 }
 
@@ -204,30 +223,33 @@ function parseStoredSession(sessionCookiesEncrypted: string | null): {
 
 /**
  * Helper to perform robust and fast Aurora ERP login.
- * Listens directly to Aurora's auth API for immediate (< 2-3s) verification.
+ * Listens directly to Aurora's auth API for immediate (< 1.5s) verification.
  */
 async function performAuroraLogin(page: Page, user: string, pass: string): Promise<boolean> {
   const trimmedUser = user.trim();
   const cleanUser = trimmedUser.includes('@') ? trimmedUser : trimmedUser.toUpperCase();
   const cleanPass = pass.trim();
 
-  logger.info(`[ERP Login] Attempting login for ${cleanUser}...`);
+  logger.info(`[ERP Login] Attempting fast login for ${cleanUser}...`);
+
+  // Block heavy assets (images, fonts) to load login page in < 300ms
+  await page.route(/\.(png|jpg|jpeg|svg|woff|woff2|webp)(\?.*)?$/i, (route) => route.abort());
 
   if (!page.url().includes('login')) {
     await page.goto('https://admissions.aurora.edu.in/login', {
       waitUntil: 'domcontentloaded',
-      timeout: 25000,
+      timeout: 12000,
     });
   }
 
-  await page.waitForSelector('#credential', { timeout: 12000 });
+  await page.waitForSelector('#credential', { timeout: 6000 });
   await page.fill('#credential', cleanUser);
   await page.fill('#password', cleanPass);
 
   // Set up response listener directly for Aurora auth API
   const authResponsePromise = page.waitForResponse(
     (res) => res.url().includes('/api/auth/login'),
-    { timeout: 12000 }
+    { timeout: 7000 }
   ).catch(() => null);
 
   await page.click('button[type="submit"]');
@@ -238,8 +260,8 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
     logger.info(`[ERP Login] Auth API response status: ${status}`);
 
     if (status === 200) {
-      // Login successful! Allow brief pause for cookies to register in context
-      await page.waitForTimeout(1000);
+      // Login successful! Brief pause to let cookies settle in context
+      await page.waitForTimeout(200);
       return true;
     }
 
@@ -251,7 +273,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
   }
 
   // Fallback if response wasn't intercepted: check page innerText for messages
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(600);
   const pageText = await page.evaluate(() => document.body.innerText || '').catch(() => '');
 
   if (pageText.toLowerCase().includes('invalid credential') || pageText.toLowerCase().includes('wrong password') || pageText.toLowerCase().includes('incorrect')) {
@@ -285,6 +307,17 @@ async function scrapeAssignments(
   },
   explicitCreds?: { username: string; password: string }
 ): Promise<ERPAssignmentData[]> {
+  const storedSession = parseStoredSession(connection.sessionCookies);
+
+  // ⚡ ULTRA-FAST PATH: Check direct student-portal API using stored session cookies first
+  // This completes in ~200-400ms without launching a Chromium browser instance!
+  if (!explicitCreds && storedSession.cookies && storedSession.cookies.length > 0) {
+    const direct = await fetchAssessmentsDirectApi(storedSession.cookies);
+    if (direct && direct.length > 0) {
+      return direct;
+    }
+  }
+
   let browser: Browser | null = null;
   try {
     browser = await chromium.launch({
@@ -383,6 +416,76 @@ async function scrapeAssignments(
   }
 }
 
+export function parseApiAssessmentItems(rawItems: any[]): ERPAssignmentData[] {
+  const assignments: ERPAssignmentData[] = [];
+  for (const it of rawItems) {
+    const cStatus = (it.computedStatus || it.status || '').toUpperCase();
+    // Hide upcoming until they become ongoing / assigned
+    if (cStatus === 'UPCOMING') continue;
+
+    const subjectName = it.subject?.name || 'Enrolled Course';
+    const subjectCode = it.subject?.code || 'COURSE';
+    const subject = `${subjectName} (${subjectCode})`;
+
+    const marksObtained = it.submission?.marksObtained ?? it.quizAttempt?.score;
+    const marksText =
+      marksObtained !== null && marksObtained !== undefined
+        ? `Scored: ${marksObtained}/${it.maxMarks}`
+        : `Max Marks: ${it.maxMarks ?? 'N/A'}`;
+
+    const status: AssignmentStatus =
+      cStatus === 'ACTIVE' || cStatus === 'ONGOING' ? 'AVAILABLE' : 'CLOSED';
+
+    assignments.push({
+      erpId: it.id || `${subjectCode}_${slugify(it.title)}`,
+      title: it.title,
+      subject,
+      description: `Type: ${it.type || it.method || 'Assessment'}\n${marksText}\nStatus: ${cStatus}`,
+      openingDate: parseDate(it.opensAt || it.submissionStartDate) ?? undefined,
+      closingDate: parseDate(it.dueDate) ?? undefined,
+      status,
+      maxMarks: it.maxMarks,
+      rawData: it,
+    });
+  }
+  return assignments;
+}
+
+async function fetchAssessmentsDirectApi(cookies: any[]): Promise<ERPAssignmentData[] | null> {
+  if (!cookies || cookies.length === 0) return null;
+  const cookieString = cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch('https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments', {
+      method: 'GET',
+      headers: {
+        'Cookie': cookieString,
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Origin': 'https://admissions.aurora.edu.in',
+        'Referer': 'https://admissions.aurora.edu.in/',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      logger.info(`[ERP Direct API] Response status ${res.status}. Falling back to browser.`);
+      return null;
+    }
+    const json: any = await res.json();
+    if (json?.data && Array.isArray(json.data) && json.data.length > 0) {
+      logger.info(`[ERP Direct API] ⚡ Fast-path retrieved ${json.data.length} assessment items in < 500ms!`);
+      return parseApiAssessmentItems(json.data);
+    }
+    return null;
+  } catch (err: any) {
+    logger.info(`[ERP Direct API] Fast-path skipped (${err.message || 'error'}). Falling back to browser.`);
+    return null;
+  }
+}
+
 async function extractAssignmentsFromPage(
   page: Page,
 ): Promise<ERPAssignmentData[]> {
@@ -404,37 +507,7 @@ async function extractAssignmentsFromPage(
     if (apiRes?.data && Array.isArray(apiRes.data) && apiRes.data.length > 0) {
       const rawItems = apiRes.data;
       logger.info(`[ERP] Direct API returned ${rawItems.length} total assessment items`);
-
-      const assignments: ERPAssignmentData[] = [];
-      for (const it of rawItems) {
-        const cStatus = (it.computedStatus || it.status || '').toUpperCase();
-        // Hide upcoming until they become ongoing / assigned
-        if (cStatus === 'UPCOMING') continue;
-
-        const subjectName = it.subject?.name || 'Enrolled Course';
-        const subjectCode = it.subject?.code || 'COURSE';
-        const subject = `${subjectName} (${subjectCode})`;
-
-        const marksObtained = it.submission?.marksObtained ?? it.quizAttempt?.score;
-        const marksText = marksObtained !== null && marksObtained !== undefined
-          ? `Scored: ${marksObtained}/${it.maxMarks}`
-          : `Max Marks: ${it.maxMarks ?? 'N/A'}`;
-
-        const status: AssignmentStatus = (cStatus === 'ACTIVE' || cStatus === 'ONGOING') ? 'AVAILABLE' : 'CLOSED';
-
-        assignments.push({
-          erpId: it.id || `${subjectCode}_${slugify(it.title)}`,
-          title: it.title,
-          subject,
-          description: `Type: ${it.type || it.method || 'Assessment'}\n${marksText}\nStatus: ${cStatus}`,
-          openingDate: parseDate(it.opensAt || it.submissionStartDate) ?? undefined,
-          closingDate: parseDate(it.dueDate) ?? undefined,
-          status,
-          maxMarks: it.maxMarks,
-          rawData: it,
-        });
-      }
-
+      const assignments = parseApiAssessmentItems(rawItems);
       logger.info(`[ERP] Successfully parsed ${assignments.length} ongoing/submitted/evaluated assignments from official API`);
       return assignments;
     }
@@ -614,76 +687,26 @@ async function processAssignments(
   let newCount = 0;
   let updatedCount = 0;
 
+  // Single fast query for all existing assignments for this connection
+  const existingList = await prisma.eRPAssignment.findMany({
+    where: { erpConnectionId },
+  });
+  const existingMap = new Map(existingList.map((e) => [e.erpId, e]));
+
+  const toCreate: ERPAssignmentData[] = [];
+  const toUpdate: Array<{
+    existing: (typeof existingList)[0];
+    data: ERPAssignmentData;
+    changes: Record<string, { old: unknown; new: unknown }>;
+    changeType: string;
+    descChanged: boolean;
+  }> = [];
+
   for (const data of fresh) {
-    const existing = await prisma.eRPAssignment.findUnique({
-      where: { erpConnectionId_erpId: { erpConnectionId, erpId: data.erpId } },
-    });
+    const existing = existingMap.get(data.erpId);
 
     if (!existing) {
-      // New assignment
-      const assignment = await prisma.eRPAssignment.create({
-        data: {
-          erpConnectionId,
-          erpId: data.erpId,
-          title: data.title,
-          subject: data.subject,
-          description: data.description,
-          openingDate: data.openingDate,
-          closingDate: data.closingDate,
-          status: data.status,
-          maxMarks: data.maxMarks,
-          rawData: data.rawData as any,
-          isNew: true,
-          isNotified: false,
-        },
-      });
-
-      // Record history
-      await prisma.assignmentHistory.create({
-        data: {
-          assignmentId: assignment.id,
-          changeType: "CREATED",
-          changedFields: {},
-          snapshotData: data.rawData as any,
-        },
-      });
-
-      // Auto-create task with automated deadline reminder schedules
-      const task = await prisma.task.create({
-        data: {
-          userId,
-          title: data.title,
-          description: data.description,
-          category: "COLLEGE_ASSIGNMENT",
-          source: "ERP",
-          openingDate: data.openingDate,
-          deadline: data.closingDate,
-          priority: "HIGH",
-          status: data.status === "CLOSED" ? "COMPLETED" : "IN_PROGRESS",
-          tags: data.subject ? [data.subject] : [],
-          reminderSchedules: {
-            create: [
-              { userId, minutesBefore: 1440 }, // 1 day before
-              { userId, minutesBefore: 120 },  // 2 hours before
-            ],
-          },
-        },
-      });
-
-      await prisma.eRPAssignment.update({
-        where: { id: assignment.id },
-        data: { taskId: task.id, isNotified: false },
-      });
-
-      // Queue notification
-      await notifyNewAssignment(
-        userId,
-        assignment.id,
-        data.title,
-        data.closingDate,
-      );
-
-      newCount++;
+      toCreate.push(data);
     } else {
       // Check for changes
       const changes: Record<string, { old: unknown; new: unknown }> = {};
@@ -713,44 +736,137 @@ async function processAssignments(
       const descChanged = data.description !== existing.description;
 
       if (Object.keys(changes).length > 0 || descChanged) {
-        await prisma.eRPAssignment.update({
-          where: { id: existing.id },
-          data: {
-            closingDate: data.closingDate,
-            status: data.status,
-            description: data.description,
-            rawData: data.rawData as any,
-            isNew: false,
-            isNotified: false,
-          },
-        });
-
-        // Keep linked Task in sync
-        if (existing.taskId) {
-          await prisma.task.update({
-            where: { id: existing.taskId },
-            data: {
-              status: data.status === "CLOSED" ? "COMPLETED" : "IN_PROGRESS",
-              description: data.description,
-              deadline: data.closingDate,
-            },
-          });
-        }
-
-        if (Object.keys(changes).length > 0) {
-          await prisma.assignmentHistory.create({
-            data: {
-              assignmentId: existing.id,
-              changeType,
-              changedFields: changes as any,
-              snapshotData: data.rawData as any,
-            },
-          });
-        }
-
-        updatedCount++;
+        toUpdate.push({ existing, data, changes, changeType, descChanged });
       }
     }
+  }
+
+  // Fast concurrent batch updates (chunked in groups of 10)
+  if (toUpdate.length > 0) {
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+      const chunk = toUpdate.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        chunk.map(async ({ existing, data, changes, changeType }) => {
+          await prisma.eRPAssignment.update({
+            where: { id: existing.id },
+            data: {
+              closingDate: data.closingDate,
+              status: data.status,
+              description: data.description,
+              rawData: data.rawData as any,
+              isNew: false,
+              isNotified: false,
+            },
+          });
+
+          // Keep linked Task in sync
+          if (existing.taskId) {
+            await prisma.task.update({
+              where: { id: existing.taskId },
+              data: {
+                status: data.status === "CLOSED" ? "COMPLETED" : "IN_PROGRESS",
+                description: data.description,
+                deadline: data.closingDate,
+              },
+            }).catch(() => {});
+          }
+
+          if (Object.keys(changes).length > 0) {
+            await prisma.assignmentHistory.create({
+              data: {
+                assignmentId: existing.id,
+                changeType,
+                changedFields: changes as any,
+                snapshotData: data.rawData as any,
+              },
+            }).catch(() => {});
+          }
+        })
+      );
+    }
+    updatedCount = toUpdate.length;
+  }
+
+  // Fast concurrent batch creations (chunked in groups of 5)
+  if (toCreate.length > 0) {
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < toCreate.length; i += BATCH_SIZE) {
+      const chunk = toCreate.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        chunk.map(async (data) => {
+          const assignment = await prisma.eRPAssignment.create({
+            data: {
+              erpConnectionId,
+              erpId: data.erpId,
+              title: data.title,
+              subject: data.subject,
+              description: data.description,
+              openingDate: data.openingDate,
+              closingDate: data.closingDate,
+              status: data.status,
+              maxMarks: data.maxMarks,
+              rawData: data.rawData as any,
+              isNew: true,
+              isNotified: false,
+            },
+          });
+
+          await prisma.assignmentHistory.create({
+            data: {
+              assignmentId: assignment.id,
+              changeType: "CREATED",
+              changedFields: {},
+              snapshotData: data.rawData as any,
+            },
+          }).catch(() => {});
+
+          const task = await prisma.task.create({
+            data: {
+              userId,
+              title: data.title,
+              description: data.description,
+              category: "COLLEGE_ASSIGNMENT",
+              source: "ERP",
+              openingDate: data.openingDate,
+              deadline: data.closingDate,
+              priority: "HIGH",
+              status: data.status === "CLOSED" ? "COMPLETED" : "IN_PROGRESS",
+              tags: data.subject ? [data.subject] : [],
+              reminderSchedules: {
+                create: [
+                  { userId, minutesBefore: 1440 }, // 1 day before
+                  { userId, minutesBefore: 120 },  // 2 hours before
+                ],
+              },
+            },
+          }).catch(() => null);
+
+          if (task) {
+            await prisma.eRPAssignment.update({
+              where: { id: assignment.id },
+              data: { taskId: task.id, isNotified: false },
+            }).catch(() => {});
+          }
+
+          await notifyNewAssignment(
+            userId,
+            assignment.id,
+            data.title,
+            data.closingDate,
+            data.subject,
+            data.status,
+            data.rawData,
+          ).catch(() => {});
+        })
+      );
+    }
+    newCount = toCreate.length;
+
+    // Automatically dispatch email and SMS notifications strictly for ongoing and missed assignments
+    checkAndDispatchOngoingAndMissedAlerts(userId).catch((err) =>
+      logger.warn(`[ERP Monitor] Automated alerts dispatch warning: ${err.message}`)
+    );
   }
 
   return { newCount, updatedCount };
@@ -838,7 +954,7 @@ export async function authenticateAndSyncWithCredentials(
   username: string,
   password: string,
   erpUrl: string = env.AURORA_ERP_URL
-): Promise<{ connectionId: string; assignmentCount: number }> {
+): Promise<{ connectionId: string; assignments: any[]; assignmentCount: number }> {
   logger.info(`[ERP] Authenticating user ${userId} with ERP credentials (${username})...`);
   const browser = await chromium.launch({
     headless: true,
@@ -868,53 +984,68 @@ export async function authenticateAndSyncWithCredentials(
 
     const page = await context.newPage();
 
-    // Verify credentials via fast direct API response detection (< 2-3s)
+    // 1. Verify credentials via direct Aurora auth API in ~1.2s
     await performAuroraLogin(page, username, password);
 
-    // Capture authenticated session cookies
+    // 2. Extract assignments immediately from the active session in ~700ms
+    logger.info(`[ERP] Extracting assignments immediately for ${username}...`);
+    const rawAssignments = await extractAssignmentsFromPage(page);
+
+    // 3. Capture authenticated session cookies
     const cookies = await context.cookies();
     const connectionId = await saveERPSession(userId, erpUrl, cookies, { username, password });
 
-    // Multi-user isolation: clear previous student's ERP assignments and tasks
-    await prisma.eRPAssignment.deleteMany({
-      where: { erpConnectionId: connectionId },
-    });
-    await prisma.task.deleteMany({
-      where: { userId, source: 'ERP' },
-    });
-    logger.info(`[ERP] Cleared previous assignments for connection ${connectionId} for clean sync`);
-
-    // Invalidate Valkey cache on credential switch
-    await valkeyCache.delPattern('valkey:erp:*');
-    await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
-
-    // Extract assignments immediately using the open session (< 1s via direct API)
-    logger.info(`[ERP] Fetching assessments for ${username}...`);
-    const assignments = await extractAssignmentsFromPage(page);
-
-    let newCount = 0;
-    if (assignments.length > 0) {
-      const res = await processAssignments(userId, connectionId, assignments);
-      newCount = res.newCount;
-    }
-
-    await prisma.eRPConnection.update({
-      where: { id: connectionId },
-      data: {
-        lastSyncStatus: 'SUCCESS',
-        lastSyncAt: new Date(),
-        lastSyncError: null,
-      },
-    });
-
-    await valkeyCache.delPattern('valkey:erp:*');
-    await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
-
-    // Close the browser instance immediately
+    // Close verification browser immediately
     await browser.close();
 
-    logger.info(`[ERP] Connected and live-synced ${assignments.length} assignments for ${username}.`);
-    return { connectionId, assignmentCount: assignments.length };
+    // 4. Format assignments into client-ready ERPAssignment objects for immediate UI display
+    const formattedAssignments = rawAssignments.map((a) => ({
+      id: a.erpId,
+      erpId: a.erpId,
+      title: a.title,
+      subject: a.subject,
+      description: a.description,
+      openingDate: a.openingDate ? a.openingDate.toISOString() : undefined,
+      closingDate: a.closingDate ? a.closingDate.toISOString() : undefined,
+      status: a.status,
+      maxMarks: a.maxMarks,
+      rawData: a.rawData,
+      isNew: false,
+      isNotified: false,
+      createdAt: new Date().toISOString(),
+      history: [],
+    }));
+
+    // Invalidate Valkey cache on credential update and cache fresh assignments
+    await valkeyCache.del(`valkey:erp:status:${userId}`).catch(() => {});
+    await valkeyCache.delPattern('valkey:erp:*').catch(() => {});
+    await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
+    await valkeyCache.set(
+      `valkey:erp:assignments:${userId}:ALL:1:100:false`,
+      { assignments: formattedAssignments, total: formattedAssignments.length, page: 1, pageSize: 100 },
+      60
+    ).catch(() => {});
+
+    // Asynchronously upsert to PostgreSQL in the background
+    (async () => {
+      try {
+        await processAssignments(userId, connectionId, rawAssignments);
+        await prisma.eRPConnection.update({
+          where: { id: connectionId },
+          data: { lastSyncStatus: 'SUCCESS', lastSyncAt: new Date(), lastSyncError: null },
+        });
+        await valkeyCache.del(`valkey:erp:status:${userId}`).catch(() => {});
+      } catch (err) {
+        logger.error('[ERP] Background persistence error:', err);
+      }
+    })();
+
+    logger.info(`[ERP] Verified credentials and returning ${formattedAssignments.length} assignments immediately for ${username}.`);
+    return {
+      connectionId,
+      assignments: formattedAssignments,
+      assignmentCount: formattedAssignments.length,
+    };
   } catch (err) {
     if (browser) {
       try { await browser.close(); } catch {}

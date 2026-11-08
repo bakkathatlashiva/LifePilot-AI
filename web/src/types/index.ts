@@ -76,6 +76,7 @@ export interface Email {
   sender?: string;
   senderEmail?: string;
   snippet?: string;
+  bodyText?: string;
   receivedAt?: string;
   isImportant: boolean;
   aiAnalyzed: boolean;
@@ -147,7 +148,8 @@ export interface UserPreference {
   notificationsEnabled: boolean;
   pushWebEnabled: boolean;
   pushAndroidEnabled: boolean;
-  phoneCallsEnabled: boolean;
+  smsNotificationsEnabled?: boolean;
+  phoneCallsEnabled?: boolean;
   phoneNumber?: string;
   erpMonitoringEnabled: boolean;
   gmailSyncEnabled: boolean;

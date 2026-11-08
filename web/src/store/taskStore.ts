@@ -29,7 +29,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   total: 0,
   page: 1,
-  pageSize: 20,
+  pageSize: 100,
   stats: null,
   isLoading: false,
   error: null,

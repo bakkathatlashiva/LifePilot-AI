@@ -59,10 +59,10 @@ export function ExamsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Exams & Study Planner</h1>
-          <p className="text-slate-500 text-sm mt-1">{upcoming.length} upcoming exams</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Exams & Study Planner</h1>
+          <p className="text-slate-400 text-xs sm:text-sm mt-0.5">{upcoming.length} upcoming exams</p>
         </div>
         <Button onClick={() => setShowCreate(true)} leftIcon={<Plus className="w-4 h-4" />}>
           Add Exam
@@ -111,13 +111,13 @@ export function ExamsPage() {
         <form onSubmit={handleCreate} className="space-y-4">
           <Input label="Exam Title *" placeholder="e.g., Discrete Mathematics Mid-term"
             value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <Input label="Exam Date & Time *" type="datetime-local"
               value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })} />
             <Input label="Duration (minutes)" type="number" placeholder="180"
               value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <Input label="Venue" placeholder="Hall A, Room 201"
               value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
             <Input label="Total Marks" type="number" placeholder="100"

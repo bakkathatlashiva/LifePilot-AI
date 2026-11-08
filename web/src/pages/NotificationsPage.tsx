@@ -17,18 +17,18 @@ export function NotificationsPage() {
       PUSH_ANDROID: '📱',
       PUSH_WEB: '🔔',
       EMAIL: '📧',
-      PHONE_CALL: '📞',
+      SMS: '💬',
       IN_APP: '🔔',
     };
     return icons[type] ?? '🔔';
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Notifications</h1>
-          <p className="text-slate-500 text-sm mt-1">
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Notifications</h1>
+          <p className="text-slate-400 text-xs sm:text-sm mt-0.5">
             {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
           </p>
         </div>
@@ -83,18 +83,24 @@ export function NotificationsPage() {
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+              {/* Actions (visible on mobile, hover on desktop) */}
+              <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex-shrink-0">
                 {!n.readAt && (
-                  <Button variant="ghost" size="icon" onClick={() => markRead(n.id)} aria-label="Mark read"
-                    className="hover:text-emerald-400 hover:bg-emerald-500/10">
+                  <button
+                    onClick={() => markRead(n.id)}
+                    aria-label="Mark read"
+                    className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition"
+                  >
                     <Check className="w-4 h-4" />
-                  </Button>
+                  </button>
                 )}
-                <Button variant="ghost" size="icon" onClick={() => dismiss(n.id)} aria-label="Dismiss"
-                  className="hover:text-red-400 hover:bg-red-500/10">
+                <button
+                  onClick={() => dismiss(n.id)}
+                  aria-label="Dismiss"
+                  className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition"
+                >
                   <X className="w-4 h-4" />
-                </Button>
+                </button>
               </div>
             </div>
           ))}

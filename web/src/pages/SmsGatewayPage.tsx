@@ -229,11 +229,11 @@ export function SmsGatewayPage() {
             Send SMS reminders & alerts through your physical Android phone's active SIM card. Zero paid API fees.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
             onClick={handleGeneratePairCode}
             disabled={generatingCode}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold shadow-lg shadow-purple-600/20 transition cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-purple-600/20 active:scale-95 transition cursor-pointer min-h-[44px]"
           >
             <Smartphone className="w-4 h-4" />
             {generatingCode ? 'Generating...' : '📱 Link Phone Gateway'}
@@ -241,7 +241,7 @@ export function SmsGatewayPage() {
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium border border-slate-700 transition cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-medium border border-slate-700 active:scale-95 transition cursor-pointer min-h-[44px]"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
@@ -251,18 +251,18 @@ export function SmsGatewayPage() {
 
       {/* Pairing Modal */}
       {pairModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-purple-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
-            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-purple-500/30 rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl relative">
+            <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
               <span>📱</span> Link Android Phone
             </h3>
             <p className="text-slate-400 text-xs mt-2 leading-relaxed">
               Open the LifePilot app on your Android phone, tap <strong>"🔗 Link via 6-Digit Web Code"</strong>, and enter this one-time security PIN:
             </p>
 
-            <div className="my-6 p-6 bg-slate-950 border border-purple-500/40 rounded-2xl text-center">
+            <div className="my-5 p-4 sm:p-6 bg-slate-950 border border-purple-500/40 rounded-2xl text-center">
               <p className="text-xs uppercase font-bold tracking-wider text-purple-400 mb-1">Your 6-Digit Device Code</p>
-              <div className="text-4xl font-extrabold tracking-widest text-white font-mono">
+              <div className="text-3xl sm:text-4xl font-extrabold tracking-widest text-white font-mono break-all">
                 {pairCode}
               </div>
               <p className="text-xs text-slate-500 mt-2">Valid for 10 minutes · No browser redirects or ngrok required</p>
@@ -271,7 +271,7 @@ export function SmsGatewayPage() {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setPairModalOpen(false)}
-                className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold transition cursor-pointer"
+                className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold transition cursor-pointer min-h-[44px]"
               >
                 Done
               </button>
@@ -601,9 +601,11 @@ export function SmsGatewayPage() {
             No SMS jobs matching filter "{filterStatus}".
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-950/70 text-slate-400 uppercase border-b border-slate-800 font-semibold">
+          <div>
+            <p className="sm:hidden text-[11px] text-slate-400 mb-2">👉 Swipe horizontally to view full queue</p>
+            <div className="table-responsive">
+              <table className="w-full text-left text-xs min-w-[600px]">
+                <thead className="bg-slate-950/70 text-slate-400 uppercase border-b border-slate-800 font-semibold">
                 <tr>
                   <th className="px-4 py-3">Recipient</th>
                   <th className="px-4 py-3">Message</th>
@@ -652,7 +654,8 @@ export function SmsGatewayPage() {
               </tbody>
             </table>
           </div>
-        )}
+        </div>
+      )}
       </div>
     </div>
   );

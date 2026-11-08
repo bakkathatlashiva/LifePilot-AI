@@ -47,12 +47,20 @@ export function NotificationPanel() {
               </div>
               <div className="flex gap-1 flex-shrink-0">
                 {!n.readAt && (
-                  <button onClick={() => markRead(n.id)} className="p-1 hover:bg-emerald-500/20 rounded-lg text-slate-500 hover:text-emerald-400 transition-colors" aria-label="Mark read">
-                    <Check className="w-3.5 h-3.5" />
+                  <button
+                    onClick={() => markRead(n.id)}
+                    className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/20 active:bg-emerald-500/30 transition-colors"
+                    aria-label="Mark read"
+                  >
+                    <Check className="w-4 h-4" />
                   </button>
                 )}
-                <button onClick={() => dismiss(n.id)} className="p-1 hover:bg-red-500/20 rounded-lg text-slate-500 hover:text-red-400 transition-colors" aria-label="Dismiss">
-                  <X className="w-3.5 h-3.5" />
+                <button
+                  onClick={() => dismiss(n.id)}
+                  className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/20 active:bg-red-500/30 transition-colors"
+                  aria-label="Dismiss"
+                >
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>

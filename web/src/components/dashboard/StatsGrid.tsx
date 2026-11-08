@@ -65,18 +65,18 @@ export function StatsGrid({ stats, loading }: StatsGridProps) {
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-4">
       {items.map((item) => (
-        <Card key={item.label} className={cn('border', item.border)} padding="md">
-          <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mb-3', item.bg, item.color)}>
+        <Card key={item.label} className={cn('border min-w-0 p-3 sm:p-4', item.border)} padding="none">
+          <div className={cn('w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center mb-2 sm:mb-3', item.bg, item.color)}>
             {item.icon}
           </div>
           {loading ? (
-            <div className="h-7 w-16 bg-white/5 rounded-lg animate-pulse mb-1" />
+            <div className="h-6 sm:h-7 w-14 sm:w-16 bg-white/5 rounded-lg animate-pulse mb-1" />
           ) : (
-            <p className={cn('text-2xl font-bold', item.color)}>{item.value}</p>
+            <p className={cn('text-lg sm:text-2xl font-bold tracking-tight truncate', item.color)}>{item.value}</p>
           )}
-          <p className="text-slate-500 text-xs mt-0.5">{item.label}</p>
+          <p className="text-slate-400 text-[11px] sm:text-xs mt-0.5 truncate">{item.label}</p>
           {item.isProgress && (
             <div className="mt-2 bg-dark-800 rounded-full h-1.5 overflow-hidden">
               <div
@@ -85,7 +85,7 @@ export function StatsGrid({ stats, loading }: StatsGridProps) {
               />
             </div>
           )}
-          {item.sub && <p className="text-slate-600 text-xs mt-0.5">{item.sub}</p>}
+          {item.sub && <p className="text-slate-500 text-[10px] sm:text-xs mt-0.5 truncate">{item.sub}</p>}
         </Card>
       ))}
     </div>

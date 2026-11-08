@@ -197,16 +197,6 @@ export async function sendGmailNotification(
       return { success: false, reason: 'DISABLED_BY_USER' };
     }
 
-    // Priority filter check
-    if (options.priority && prefs.emailMinPriority) {
-      const minLevel = PRIORITY_ORDER[prefs.emailMinPriority] ?? 2;
-      const currentLevel = PRIORITY_ORDER[options.priority] ?? 2;
-      if (currentLevel < minLevel) {
-        logger.info(`[Gmail Notification] Priority ${options.priority} below min priority ${prefs.emailMinPriority}. Skipping.`);
-        return { success: false, reason: 'DISABLED_BY_USER' };
-      }
-    }
-
     // Category filter check (if user configured specific allowed categories)
     if (options.category && prefs.emailCategories && prefs.emailCategories.length > 0) {
       const isAllowed = prefs.emailCategories.includes(options.category as any);

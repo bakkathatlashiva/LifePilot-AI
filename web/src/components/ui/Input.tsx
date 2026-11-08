@@ -37,7 +37,7 @@ export function Input({
         <input
           id={inputId}
           className={cn(
-            "bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 placeholder-slate-500 w-full",
+            "bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-base sm:text-sm text-slate-100 placeholder-slate-500 w-full min-h-[44px]",
             "focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30",
             "transition-all duration-200",
             "disabled:opacity-50 disabled:cursor-not-allowed",
@@ -89,7 +89,7 @@ export function Select({
       <select
         id={selectId}
         className={cn(
-          "bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 w-full",
+          "bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-base sm:text-sm text-slate-100 w-full min-h-[44px]",
           "focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30",
           "transition-all duration-200 appearance-none",
           error && "border-red-500/50",
@@ -138,7 +138,7 @@ export function Textarea({
       <textarea
         id={textareaId}
         className={cn(
-          "bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 placeholder-slate-500 w-full",
+          "bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-base sm:text-sm text-slate-100 placeholder-slate-500 w-full",
           "focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30",
           "transition-all duration-200 resize-none",
           error && "border-red-500/50",

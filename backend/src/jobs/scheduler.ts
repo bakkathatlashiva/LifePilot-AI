@@ -8,6 +8,7 @@ import {
   checkAndCreateDeadlineReminders,
   checkAndSend12HourSmsReminders,
   checkAndSend24HourDeadlineSmsReminders,
+  checkAndDispatchAllOngoingAndMissedAlerts,
 } from '../services/notifications/notificationService';
 import { prisma } from '../config/database';
 import { emailQueue, emailWorker } from '../queues/email.queue';
@@ -150,6 +151,13 @@ export function startCronJobs() {
     );
   });
 
+  // Automated Email & SMS alerts strictly for ONGOING and MISSED assignments (Runs every 15 minutes)
+  cron.schedule('*/15 * * * *', async () => {
+    checkAndDispatchAllOngoingAndMissedAlerts().catch((err) =>
+      logger.error('[Scheduler] Error in automated ongoing/missed alerts:', err)
+    );
+  });
+
   // 24-Hour Urgent Deadline SMS Alerts (Runs every 15 minutes to guarantee immediate trigger)
   cron.schedule('*/15 * * * *', async () => {
     checkAndSend24HourDeadlineSmsReminders().catch((err) =>
@@ -157,15 +165,18 @@ export function startCronJobs() {
     );
   });
 
-  // Initial SMS check on startup
+  // Initial checks on startup
   setTimeout(() => {
+    checkAndDispatchAllOngoingAndMissedAlerts().catch((err) =>
+      logger.error('[Scheduler] Initial ongoing/missed alerts check failed:', err)
+    );
     checkAndSend24HourDeadlineSmsReminders().catch((err) =>
       logger.error('[Scheduler] Initial 24h deadline SMS check failed:', err)
     );
     checkAndSend12HourSmsReminders().catch((err) =>
       logger.error('[Scheduler] Initial 12h SMS reminder check failed:', err)
     );
-  }, 5000);
+  }, 4000);
 
   // Schedule automated ERP syncs: evaluates every minute against each connection's configured interval
   cron.schedule('* * * * *', async () => {

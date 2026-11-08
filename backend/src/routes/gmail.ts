@@ -5,6 +5,8 @@ import { sendSuccess, sendError, sendPaginated } from '../utils/apiResponse';
 import { syncGmail } from '../services/gmail/gmailService';
 import { analyzeEmailWithAI } from '../services/ai/emailAnalyzer';
 import { gmailQueue } from '../jobs/scheduler';
+import { valkeyCache } from '../config/valkey';
+import { logger } from '../utils/logger';
 
 const router = Router();
 router.use(requireAuth);
@@ -101,7 +103,13 @@ router.post('/suggestions/:id/approve', async (req: AuthRequest, res: Response) 
     });
 
     if (!suggestion) return sendError(res, 'Suggestion not found', 404);
-    if (suggestion.isApproved !== null) return sendError(res, 'Suggestion already actioned', 400);
+    if (suggestion.isApproved !== null) {
+      if (suggestion.isApproved && suggestion.taskId) {
+        const existingTask = await prisma.task.findUnique({ where: { id: suggestion.taskId } });
+        if (existingTask) return sendSuccess(res, existingTask, 'Task already created from this suggestion');
+      }
+      return sendError(res, 'Suggestion already actioned', 400);
+    }
 
     // Allow editing before approval
     const overrides = req.body ?? {};
@@ -117,7 +125,7 @@ router.post('/suggestions/:id/approve', async (req: AuthRequest, res: Response) 
           ? new Date(overrides.deadline)
           : suggestion.suggestedDueDate,
         priority: overrides.priority ?? suggestion.priority,
-        status: 'UPCOMING',
+        status: 'AVAILABLE',
         reminderSchedules: {
           create: [
             { userId: req.user!.userId, minutesBefore: 1440, channels: ['PUSH_ANDROID', 'PUSH_WEB'] },
@@ -132,8 +140,14 @@ router.post('/suggestions/:id/approve', async (req: AuthRequest, res: Response) 
       data: { isApproved: true, approvedAt: new Date(), taskId: task.id },
     });
 
+    // Invalidate stats and task cache so the new task appears everywhere immediately
+    await valkeyCache.del(`valkey:stats:${req.user!.userId}`).catch(() => {});
+    await valkeyCache.delPattern('valkey:tasks:*').catch(() => {});
+
+    logger.info(`[Gmail] Task ${task.id} created from suggestion ${suggestion.id} for user ${req.user!.userId}`);
     return sendSuccess(res, task, 'Task created from suggestion', 201);
   } catch (error: any) {
+    logger.error('[Gmail Suggestions] Approve error:', error);
     return sendError(res, error.message || 'Failed to approve suggestion');
   }
 });

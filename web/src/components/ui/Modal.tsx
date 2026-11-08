@@ -22,11 +22,12 @@ const sizes = {
 export function Modal({ isOpen, onClose, title, children, size = 'md', footer }: ModalProps) {
   useEffect(() => {
     if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
     }
-    return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer }:
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby={title ? 'modal-title' : undefined}
@@ -55,37 +56,41 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer }:
       <div
         className={cn(
           'relative w-full bg-dark-900 border border-white/10 rounded-2xl shadow-2xl animate-slide-up',
-          'flex flex-col max-h-[90vh]',
+          'flex flex-col max-h-[90dvh]',
           sizes[size]
         )}
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between p-5 border-b border-white/8">
-            <h2 id="modal-title" className="text-slate-100 font-semibold text-lg">
+          <div className="flex items-center justify-between p-4 sm:p-5 border-b border-white/8">
+            <h2 id="modal-title" className="text-slate-100 font-semibold text-base sm:text-lg pr-4">
               {title}
             </h2>
-            <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close modal">
-              <X className="w-4 h-4" />
-            </Button>
+            <button
+              onClick={onClose}
+              aria-label="Close modal"
+              className="min-h-[44px] min-w-[44px] -mr-2 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-100 hover:bg-white/10 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
         )}
         {!title && (
           <button
-            className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-white/8 text-slate-400 hover:text-slate-200 transition-colors"
+            className="absolute top-3 right-3 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl hover:bg-white/10 text-slate-400 hover:text-slate-200 transition"
             onClick={onClose}
             aria-label="Close modal"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5">{children}</div>
 
         {/* Footer */}
         {footer && (
-          <div className="p-5 border-t border-white/8 flex justify-end gap-3">{footer}</div>
+          <div className="p-4 sm:p-5 border-t border-white/8 flex flex-wrap justify-end gap-2.5">{footer}</div>
         )}
       </div>
     </div>

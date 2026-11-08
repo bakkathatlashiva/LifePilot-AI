@@ -68,14 +68,17 @@ export function CalendarPage() {
             </div>
 
             {/* Day headers */}
-            <div className="grid grid-cols-7 mb-2">
+            <div className="grid grid-cols-7 mb-1 sm:mb-2">
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-                <div key={d} className="text-center text-xs font-medium text-slate-500 py-2">{d}</div>
+                <div key={d} className="text-center text-[11px] sm:text-xs font-semibold text-slate-400 py-1.5 sm:py-2">
+                  <span className="sm:hidden">{d[0]}</span>
+                  <span className="hidden sm:inline">{d}</span>
+                </div>
               ))}
             </div>
 
             {/* Days grid */}
-            <div className="grid grid-cols-7 gap-1">
+            <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
               {days.map((d) => {
                 const dayTasks = getTasksForDay(d);
                 const isToday = isSameDay(d, new Date());
@@ -86,40 +89,57 @@ export function CalendarPage() {
                   <button
                     key={d.toISOString()}
                     onClick={() => setSelectedDay(d)}
-                    className={`relative min-h-[70px] p-2 rounded-xl text-left transition-all duration-200 ${
+                    className={`relative min-h-[46px] sm:min-h-[75px] p-1 sm:p-2 rounded-xl text-left transition-all duration-200 flex flex-col justify-between ${
                       isSelected
-                        ? 'bg-purple-600/30 border border-purple-500/50'
+                        ? 'bg-purple-600/30 border border-purple-500/60 shadow-md'
                         : isToday
                         ? 'bg-blue-600/15 border border-blue-500/30'
                         : 'hover:bg-white/5 border border-transparent'
                     }`}
                     aria-label={`${format(d, 'MMMM d')}${dayTasks.length > 0 ? `, ${dayTasks.length} tasks` : ''}`}
                   >
-                    <span className={`text-xs font-medium block mb-1 ${
-                      !isCurrentMonth ? 'text-slate-700' :
+                    <span className={`text-[11px] sm:text-xs font-bold block ${
+                      !isCurrentMonth ? 'text-slate-600' :
                       isToday ? 'text-blue-400' :
                       isSelected ? 'text-purple-300' :
-                      'text-slate-400'
+                      'text-slate-300'
                     }`}>
                       {format(d, 'd')}
                     </span>
 
-                    {/* Task dots */}
-                    <div className="space-y-0.5">
+                    {/* Mobile: Compact task dots indicator */}
+                    <div className="flex sm:hidden flex-wrap gap-1 mt-auto justify-center">
                       {dayTasks.slice(0, 3).map((t) => (
+                        <span
+                          key={t.id}
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            t.priority === 'CRITICAL' ? 'bg-red-400' :
+                            t.priority === 'HIGH' ? 'bg-orange-400' :
+                            'bg-purple-400'
+                          }`}
+                        />
+                      ))}
+                      {dayTasks.length > 3 && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                      )}
+                    </div>
+
+                    {/* Desktop / Tablet: Full task labels */}
+                    <div className="hidden sm:block space-y-1 w-full mt-1">
+                      {dayTasks.slice(0, 2).map((t) => (
                         <div
                           key={t.id}
-                          className={`text-[10px] truncate px-1 py-0.5 rounded ${
-                            t.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
-                            t.priority === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
-                            'bg-purple-500/20 text-purple-400'
+                          className={`text-[10px] truncate px-1.5 py-0.5 rounded font-medium ${
+                            t.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-300' :
+                            t.priority === 'HIGH' ? 'bg-orange-500/20 text-orange-300' :
+                            'bg-purple-500/20 text-purple-300'
                           }`}
                         >
                           {t.title}
                         </div>
                       ))}
-                      {dayTasks.length > 3 && (
-                        <p className="text-[10px] text-slate-500">+{dayTasks.length - 3} more</p>
+                      {dayTasks.length > 2 && (
+                        <p className="text-[10px] text-slate-500 font-medium">+{dayTasks.length - 2} more</p>
                       )}
                     </div>
                   </button>

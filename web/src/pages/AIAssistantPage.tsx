@@ -93,27 +93,27 @@ export function AIAssistantPage() {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in h-[calc(100vh-8rem)] flex flex-col">
+    <div className="space-y-3 sm:space-y-4 animate-fade-in h-[calc(100dvh-5.5rem)] md:h-[calc(100vh-8rem)] flex flex-col min-w-0">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
+        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg shadow-purple-900/30 flex-shrink-0">
           <Sparkles className="w-5 h-5 text-white" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-white">AI Assistant</h1>
-          <p className="text-slate-500 text-xs">Answers using your real task & email data</p>
+          <h1 className="text-lg sm:text-xl font-bold text-white">AI Assistant</h1>
+          <p className="text-slate-400 text-xs">Answers using your real task & email data</p>
         </div>
       </div>
 
-      {/* Suggested prompts */}
+      {/* Suggested prompts (Horizontal scroll on mobile) */}
       {messages.length <= 1 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 overflow-x-auto pb-1.5 -mx-1 px-1 touch-pan-x flex-nowrap sm:flex-wrap">
           {SUGGESTED_PROMPTS.map((p) => (
             <button
               key={p}
               onClick={() => send(p)}
-              className="px-3 py-1.5 bg-dark-900 border border-white/10 rounded-xl text-sm text-slate-400
-                         hover:text-slate-200 hover:border-purple-500/30 transition-all duration-200"
+              className="px-3.5 py-2 bg-dark-900 border border-white/10 rounded-xl text-xs sm:text-sm text-slate-300
+                         hover:text-white hover:border-purple-500/40 active:scale-95 transition-all duration-200 whitespace-nowrap min-h-[38px] flex-shrink-0"
             >
               {p}
             </button>
@@ -122,12 +122,12 @@ export function AIAssistantPage() {
       )}
 
       {/* Messages */}
-      <Card padding="none" className="flex-1 overflow-y-auto">
-        <div className="p-4 space-y-4">
+      <Card padding="none" className="flex-1 overflow-y-auto min-w-0">
+        <div className="p-3.5 sm:p-5 space-y-4">
           {messages.map((msg) => (
             <div
               key={msg.id}
-              className={`flex items-start gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+              className={`flex items-start gap-2.5 sm:gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
             >
               {/* Avatar */}
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
@@ -141,8 +141,8 @@ export function AIAssistantPage() {
               </div>
 
               {/* Bubble */}
-              <div className={`max-w-[75%] ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col`}>
-                <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+              <div className={`max-w-[88%] sm:max-w-[75%] ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col`}>
+                <div className={`rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed ${
                   msg.role === 'user'
                     ? 'bg-purple-600 text-white rounded-tr-sm'
                     : 'bg-dark-800 text-slate-200 rounded-tl-sm border border-white/5'
@@ -152,12 +152,12 @@ export function AIAssistantPage() {
                   {/* Task created card */}
                   {msg.type === 'task_created' && msg.task && (
                     <div className="mt-3 p-3 bg-emerald-500/15 border border-emerald-500/25 rounded-xl">
-                      <p className="text-emerald-400 text-xs font-medium">✅ Task Created</p>
+                      <p className="text-emerald-400 text-xs font-semibold">✅ Task Created</p>
                       <p className="text-emerald-300 text-xs mt-1">{String(msg.task.title)}</p>
                     </div>
                   )}
                 </div>
-                <p className="text-xs text-slate-600 mt-1 px-1">
+                <p className="text-[10px] sm:text-xs text-slate-500 mt-1 px-1">
                   {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
@@ -171,7 +171,7 @@ export function AIAssistantPage() {
                 <Sparkles className="w-4 h-4 text-white" />
               </div>
               <div className="bg-dark-800 rounded-2xl rounded-tl-sm px-4 py-3 border border-white/5">
-                <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+                <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
               </div>
             </div>
           )}
@@ -181,12 +181,12 @@ export function AIAssistantPage() {
       </Card>
 
       {/* Input */}
-      <div className="flex gap-3">
+      <div className="flex gap-2 sm:gap-3">
         <textarea
-          className="flex-1 bg-dark-900 border border-white/10 rounded-2xl px-4 py-3 text-slate-100 placeholder-slate-500
+          className="flex-1 bg-dark-900 border border-white/10 rounded-2xl px-3.5 sm:px-4 py-3 text-slate-100 placeholder-slate-500
                      focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/20
-                     transition-all duration-200 resize-none text-sm min-h-[50px] max-h-[120px]"
-          placeholder="Ask me anything... (Enter to send, Shift+Enter for new line)"
+                     transition-all duration-200 resize-none text-base sm:text-sm min-h-[48px] max-h-[120px]"
+          placeholder="Ask me anything... (Enter to send)"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -195,8 +195,8 @@ export function AIAssistantPage() {
         <button
           onClick={() => send()}
           disabled={!input.trim() || loading}
-          className="w-12 h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center justify-center text-white transition-all duration-200 active:scale-95 flex-shrink-0 self-end"
+          className="min-h-[48px] min-w-[48px] rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed
+                     flex items-center justify-center text-white transition-all duration-200 active:scale-95 flex-shrink-0 self-end shadow-md shadow-purple-900/40"
           aria-label="Send message"
         >
           <Send className="w-4 h-4" />

@@ -30,31 +30,6 @@ export function LoginPage() {
     window.location.href = `${API_BASE_URL}/auth/google?returnTo=${returnTo}`;
   };
 
-  const [devLoading, setDevLoading] = React.useState(false);
-  const isLocalhost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1' ||
-      window.location.hostname.startsWith('192.168.'));
-
-  const handleDevLogin = async () => {
-    setDevLoading(true);
-    try {
-      const res = await api.post('/auth/dev-login', {
-        email: 'bakkathatlashiva@gmail.com',
-        name: 'Shiva Bakkathatla',
-      });
-      const { accessToken, refreshToken } = res.data.data;
-      setTokens(accessToken, refreshToken);
-      await loadProfile();
-      navigate('/dashboard');
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Dev login failed');
-    } finally {
-      setDevLoading(false);
-    }
-  };
-
   const features = [
     { icon: <Bell className="w-5 h-5" />, text: 'Auto-detect ERP assignments & notify you instantly' },
     { icon: <Zap className="w-5 h-5" />, text: 'AI analysis of your academic emails for important notices' },
@@ -100,18 +75,18 @@ export function LoginPage() {
       </div>
 
       {/* Right: login form */}
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8">
         <div className="w-full max-w-md">
           {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-10">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
+          <div className="lg:hidden flex items-center gap-3 mb-6 sm:mb-10">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg shadow-purple-900/40">
               <Zap className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xl font-bold text-white">LifePilot AI</span>
+            <span className="text-xl font-bold text-white tracking-tight">LifePilot AI</span>
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-2">Welcome to LifePilot AI</h2>
-          <p className="text-slate-400 mb-8">Sign in with your Google account to access your dashboard, ERP assignments, and academic tools.</p>
+          <h2 className="text-xl sm:text-2xl font-bold text-white mb-2">Welcome to LifePilot AI</h2>
+          <p className="text-slate-400 text-sm mb-6 sm:mb-8">Sign in with your Google account to access your dashboard, ERP assignments, and academic tools.</p>
 
           {errorParam && (
             <div className="mb-6 p-4 bg-red-500/10 border border-red-500/25 rounded-2xl flex items-start gap-3">
@@ -144,18 +119,6 @@ export function LoginPage() {
             </svg>
             <span className="text-[15px]">Continue with Google</span>
           </button>
-
-          {isLocalhost && (
-            <button
-              onClick={handleDevLogin}
-              disabled={devLoading}
-              className="mt-3 w-full flex items-center justify-center gap-2.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/30
-                         font-medium px-6 py-3 rounded-2xl transition-all duration-200 active:scale-[0.98] cursor-pointer text-sm"
-            >
-              <Zap className="w-4 h-4 text-purple-400" />
-              <span>{devLoading ? 'Signing in...' : '⚡ Quick Dev Sign In (Shiva)'}</span>
-            </button>
-          )}
 
           <p className="text-center text-xs text-slate-500 mt-3">
             Fast, secure single sign-on using Google OAuth 2.0

@@ -4,6 +4,17 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      screens: {
+        xs: '375px',
+      },
+      zIndex: {
+        45: '45',
+        60: '60',
+        70: '70',
+      },
+      minHeight: {
+        touch: '44px',
+      },
       colors: {
         navy: {
           50: '#e8eaf6',

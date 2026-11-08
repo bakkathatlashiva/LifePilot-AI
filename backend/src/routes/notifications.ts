@@ -3,7 +3,6 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { prisma } from '../config/database';
 import { sendSuccess, sendError, sendPaginated } from '../utils/apiResponse';
 import { env } from '../config/env';
-import { sendTestEmailNotification } from '../services/notifications/gmailNotificationService';
 import webpush from 'web-push';
 
 const router = Router();
@@ -127,19 +126,6 @@ router.post('/read-all', async (req: AuthRequest, res: Response) => {
     return sendSuccess(res, null, 'All notifications marked as read');
   } catch (error) {
     return sendError(res, 'Failed to mark notifications as read');
-  }
-});
-
-// Send test Gmail notification
-router.post('/test-email', async (req: AuthRequest, res: Response) => {
-  try {
-    const result = await sendTestEmailNotification(req.user!.userId);
-    if (!result.success) {
-      return sendError(res, result.error || 'Failed to send test email', 400);
-    }
-    return sendSuccess(res, result, `Test notification successfully sent to ${result.recipientEmail}`);
-  } catch (error: any) {
-    return sendError(res, error.message || 'Failed to send test email', 500);
   }
 });
 

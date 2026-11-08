@@ -5,7 +5,7 @@ import { Card, CardHeader } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Task } from '../../types';
-import { formatDeadline, PRIORITY_CONFIG, STATUS_CONFIG, CATEGORY_CONFIG } from '../../lib/utils';
+import { formatDeadline, STATUS_CONFIG, CATEGORY_CONFIG } from '../../lib/utils';
 import { useTaskStore } from '../../store/taskStore';
 
 interface UpcomingTasksProps {
@@ -46,7 +46,6 @@ export function UpcomingTasks({ tasks, loading }: UpcomingTasksProps) {
         <div className="space-y-2">
           {upcoming.map((task) => {
             const cat = CATEGORY_CONFIG[task.category];
-            const prio = PRIORITY_CONFIG[task.priority];
             const isOverdue = task.status === 'OVERDUE';
 
             return (
@@ -56,7 +55,7 @@ export function UpcomingTasks({ tasks, loading }: UpcomingTasksProps) {
                 onClick={() => navigate(`/tasks/${task.id}`)}
               >
                 <button
-                  className="flex-shrink-0 text-slate-600 hover:text-emerald-400 transition-colors"
+                  className="flex-shrink-0 min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center text-slate-500 hover:text-emerald-400 active:scale-90 transition"
                   onClick={(e) => { e.stopPropagation(); completeTask(task.id); }}
                   aria-label="Mark complete"
                 >
@@ -76,8 +75,6 @@ export function UpcomingTasks({ tasks, loading }: UpcomingTasksProps) {
                     </span>
                   </div>
                 </div>
-
-                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${prio.dot}`} />
               </div>
             );
           })}

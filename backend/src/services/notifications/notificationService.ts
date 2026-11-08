@@ -23,11 +23,269 @@ export async function getUserRecipientPhone(userId: string): Promise<string | nu
     select: { phoneNumber: true, smsNotificationsEnabled: true },
   });
   if (prefs?.phoneNumber) return prefs.phoneNumber;
+
   const device = await prisma.smsGatewayDevice.findFirst({
-    where: { userId, status: 'ONLINE' },
+    where: { userId },
     select: { phoneNumber: true },
   });
-  return device?.phoneNumber || null;
+  if (device?.phoneNumber) return device.phoneNumber;
+
+  // Fallback to most recent recipientPhone used in SMS jobs for this user
+  const lastJob = await prisma.smsJob.findFirst({
+    where: { userId, recipientPhone: { not: '' } },
+    orderBy: { createdAt: 'desc' },
+    select: { recipientPhone: true },
+  });
+  if (lastJob?.recipientPhone) return lastJob.recipientPhone;
+
+  return null;
+}
+
+function formatDeadlineDisplay(date?: Date | null): string {
+  if (!date) return 'No deadline set';
+  const d = new Date(date);
+  return d.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+/**
+ * Determines whether an assignment is strictly ONGOING or MISSED.
+ * Explicitly filters out SUBMITTED, EVALUATED, RESULT, INELIGIBLE, and UPCOMING.
+ */
+export function isAssignmentOngoingOrMissed(
+  status: string,
+  closingDate?: Date | null,
+  rawData?: any,
+): { isEligible: boolean; alertType: 'ONGOING' | 'MISSED' } {
+  const now = new Date();
+  const raw = rawData || {};
+  const computedStatus = (raw.computedStatus || raw.status || '').toUpperCase();
+
+  // Strictly filter out submitted, evaluated, result, ineligible, and upcoming
+  if (
+    computedStatus.includes('SUBMITTED') ||
+    computedStatus.includes('EVALUATED') ||
+    computedStatus.includes('RESULT') ||
+    computedStatus.includes('INELIGIBLE') ||
+    computedStatus.includes('UPCOMING')
+  ) {
+    return { isEligible: false, alertType: 'ONGOING' };
+  }
+
+  const hasDeadlinePassed = closingDate ? now > new Date(closingDate) : false;
+
+  // Missed: marked as missed, or closingDate has passed without submission/evaluation
+  if (
+    computedStatus.includes('MISSED') ||
+    (status === 'CLOSED' && hasDeadlinePassed) ||
+    (status === 'AVAILABLE' && hasDeadlinePassed)
+  ) {
+    return { isEligible: true, alertType: 'MISSED' };
+  }
+
+  // Ongoing: available or active or published and deadline has not passed
+  if (
+    !hasDeadlinePassed &&
+    (status === 'AVAILABLE' ||
+      computedStatus === 'ACTIVE' ||
+      computedStatus === 'ONGOING' ||
+      computedStatus === 'PUBLISHED')
+  ) {
+    return { isEligible: true, alertType: 'ONGOING' };
+  }
+
+  return { isEligible: false, alertType: 'ONGOING' };
+}
+
+/**
+ * Dispatches automated email and SMS notifications strictly for ONGOING and MISSED assignments.
+ * Format requirement: "subject name , which assignment , deadline"
+ */
+export async function sendOngoingOrMissedAssignmentAlert(
+  userId: string,
+  assignment: {
+    id: string;
+    title: string;
+    subject?: string | null;
+    closingDate?: Date | null;
+    taskId?: string | null;
+  },
+  alertType: 'ONGOING' | 'MISSED'
+): Promise<void> {
+  const subjectName = assignment.subject || 'Enrolled Subject';
+  const assignmentTitle = assignment.title || 'Assignment';
+  const deadlineStr = formatDeadlineDisplay(assignment.closingDate);
+  const isOngoing = alertType === 'ONGOING';
+
+  // 1. In-App Notification
+  await prisma.notification.create({
+    data: {
+      userId,
+      taskId: assignment.taskId || undefined,
+      type: 'IN_APP',
+      status: 'PENDING',
+      title: isOngoing
+        ? `📚 [ONGOING] ${subjectName} — ${assignmentTitle}`
+        : `⚠️ [MISSED] ${subjectName} — ${assignmentTitle}`,
+      body: `Subject: ${subjectName}\nAssignment: ${assignmentTitle}\nDeadline: ${deadlineStr}`,
+      data: {
+        type: isOngoing ? 'ONGOING_ASSIGNMENT' : 'MISSED_ASSIGNMENT',
+        assignmentId: assignment.id,
+        subject: subjectName,
+        title: assignmentTitle,
+        deadline: deadlineStr,
+      },
+      scheduledAt: new Date(),
+    },
+  }).catch((err) => logger.warn(`[Notification] In-app record creation warning: ${err.message}`));
+
+  // 2. Web & FCM Push Notification
+  await sendPushNotification(userId, {
+    title: isOngoing
+      ? `📚 Ongoing: ${subjectName} — ${assignmentTitle}`
+      : `⚠️ Missed: ${subjectName} — ${assignmentTitle}`,
+    body: `Subject: ${subjectName} | Assignment: ${assignmentTitle} | Deadline: ${deadlineStr}`,
+    data: {
+      type: isOngoing ? 'ONGOING_ASSIGNMENT' : 'MISSED_ASSIGNMENT',
+      assignmentId: assignment.id,
+    },
+  }).catch((err) => logger.warn(`[Notification] Push notification warning: ${err.message}`));
+
+  // 3. Automated Gmail Notification (Subject Name, Which Assignment, Deadline)
+  const emailTitle = isOngoing
+    ? `📌 [ONGOING] ${subjectName} - ${assignmentTitle} | Due: ${deadlineStr}`
+    : `⚠️ [MISSED] ${subjectName} - ${assignmentTitle} | Due: ${deadlineStr}`;
+
+  const emailMessage = isOngoing
+    ? `An ongoing assignment requires your action:\n\n• Subject Name: ${subjectName}\n• Which Assignment: ${assignmentTitle}\n• Deadline: ${deadlineStr}\n\nPlease complete and submit on your portal before the deadline.`
+    : `A missed assignment was detected on your portal:\n\n• Subject Name: ${subjectName}\n• Which Assignment: ${assignmentTitle}\n• Deadline: ${deadlineStr} (Passed)\n\nPlease review your portal immediately.`;
+
+  await dispatchEmailNotification(userId, {
+    taskId: assignment.taskId || undefined,
+    title: emailTitle,
+    message: emailMessage,
+    category: 'COLLEGE_ASSIGNMENT',
+    priority: isOngoing ? 'HIGH' : 'CRITICAL',
+    dueDate: assignment.closingDate ?? undefined,
+    actionUrl: `${env.FRONTEND_URL}/tasks`,
+    actionText: isOngoing ? 'Open Assignment in LifePilot' : 'Review Missed Assignment',
+    badgeText: isOngoing ? 'ONGOING' : 'MISSED',
+    details: [
+      { label: 'Subject Name', value: subjectName },
+      { label: 'Which Assignment', value: assignmentTitle },
+      { label: 'Deadline', value: deadlineStr },
+      { label: 'Status', value: isOngoing ? 'Ongoing (Pending Submission)' : 'Missed (Overdue)' },
+    ],
+  }).catch((err) => logger.warn(`[Notification] Email dispatch warning: ${err.message}`));
+
+  // 4. Automated SMS via SIM Gateway (Subject Name, Which Assignment, Deadline)
+  try {
+    const recipientPhone = await getUserRecipientPhone(userId);
+    if (recipientPhone) {
+      const smsBody = isOngoing
+        ? `LifePilot Alert [ONGOING]: Subject: ${subjectName} | Assignment: ${assignmentTitle} | Deadline: ${deadlineStr}. Submit before deadline!`
+        : `LifePilot Alert [MISSED]: Subject: ${subjectName} | Assignment: ${assignmentTitle} | Deadline: ${deadlineStr} (Passed). Status: Missed!`;
+
+      await dispatchSmsNotification(userId, recipientPhone, smsBody);
+      logger.info(`[Notification] Automated SMS dispatched to ${recipientPhone} for ${alertType}: ${subjectName} - ${assignmentTitle}`);
+    } else {
+      logger.info(`[Notification] No phone number available for user ${userId}, skipped SMS.`);
+    }
+  } catch (smsErr: any) {
+    logger.warn(`[Notification] Failed to dispatch automated SMS: ${smsErr.message}`);
+  }
+}
+
+/**
+ * Automatically evaluates all ERP assignments for a user and dispatches
+ * email and SMS notifications strictly for ONGOING and MISSED assignments.
+ */
+export async function checkAndDispatchOngoingAndMissedAlerts(
+  userId: string
+): Promise<{ ongoingSent: number; missedSent: number }> {
+  let ongoingSent = 0;
+  let missedSent = 0;
+  const now = new Date();
+
+  const connections = await prisma.eRPConnection.findMany({
+    where: { userId, isActive: true },
+    select: { id: true },
+  });
+
+  if (connections.length === 0) return { ongoingSent, missedSent };
+  const connectionIds = connections.map((c) => c.id);
+
+  const assignments = await prisma.eRPAssignment.findMany({
+    where: { erpConnectionId: { in: connectionIds } },
+  });
+
+  for (const a of assignments) {
+    const { isEligible, alertType } = isAssignmentOngoingOrMissed(a.status, a.closingDate, a.rawData);
+    if (!isEligible) continue;
+
+    const historyType = alertType === 'MISSED' ? 'ALERT_MISSED_AUTO' : 'ALERT_ONGOING_AUTO';
+    const cooldownHours = alertType === 'MISSED' ? 24 : 12;
+    const cooldownThreshold = new Date(now.getTime() - cooldownHours * 60 * 60 * 1000);
+
+    const recentAlert = await prisma.assignmentHistory.findFirst({
+      where: {
+        assignmentId: a.id,
+        changeType: historyType,
+        detectedAt: { gte: cooldownThreshold },
+      },
+    });
+
+    if (recentAlert) continue;
+
+    await sendOngoingOrMissedAssignmentAlert(userId, a, alertType);
+
+    await prisma.assignmentHistory.create({
+      data: {
+        assignmentId: a.id,
+        changeType: historyType,
+        changedFields: {
+          alertType,
+          subject: a.subject,
+          title: a.title,
+          deadline: a.closingDate,
+          dispatchedAt: now.toISOString(),
+        },
+      },
+    }).catch(() => {});
+
+    if (alertType === 'ONGOING') ongoingSent++;
+    else missedSent++;
+  }
+
+  logger.info(`[Notification] Automated alerts completed for user ${userId}: ${ongoingSent} ongoing, ${missedSent} missed.`);
+  return { ongoingSent, missedSent };
+}
+
+/**
+ * Global sweep across all active users with ERP connections.
+ */
+export async function checkAndDispatchAllOngoingAndMissedAlerts(): Promise<void> {
+  try {
+    const activeConnections = await prisma.eRPConnection.findMany({
+      where: { isActive: true },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+
+    for (const conn of activeConnections) {
+      await checkAndDispatchOngoingAndMissedAlerts(conn.userId).catch((err) =>
+        logger.error(`[Notification] Error in automated alerts for user ${conn.userId}:`, err)
+      );
+    }
+  } catch (err: any) {
+    logger.error(`[Notification] Error in checkAndDispatchAllOngoingAndMissedAlerts: ${err.message}`);
+  }
 }
 
 export async function dispatchEmailNotification(
@@ -73,57 +331,22 @@ export async function notifyNewAssignment(
   assignmentId: string,
   title: string,
   deadline?: Date | null,
+  subject?: string | null,
+  status?: string | null,
+  rawData?: any,
+  taskId?: string | null,
 ): Promise<void> {
-  const deadlineStr = deadline
-    ? `Due: ${deadline.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
-    : "No deadline set";
-
-  await prisma.notification.create({
-    data: {
-      userId,
-      type: "IN_APP",
-      status: "PENDING",
-      title: "📚 New Assignment Published",
-      body: `${title}\n${deadlineStr}`,
-      data: { assignmentId, type: "NEW_ASSIGNMENT" },
-      scheduledAt: new Date(),
-    },
-  });
-
-  // Push notification
-  await sendPushNotification(userId, {
-    title: "📚 New Assignment",
-    body: `${title} — ${deadlineStr}`,
-    data: { type: "NEW_ASSIGNMENT", assignmentId },
-  });
-
-  // Gmail notification (automatic delivery)
-  await dispatchEmailNotification(userId, {
-    taskId: assignmentId,
-    title: `📚 New Assignment: ${title}`,
-    message: `A new assignment "${title}" has been published with deadline ${deadlineStr}.`,
-    category: 'COLLEGE_ASSIGNMENT',
-    priority: 'MEDIUM',
-    dueDate: deadline ?? undefined,
-    actionUrl: `${env.FRONTEND_URL}/tasks`,
-    actionText: 'View Assignment',
-    details: [
-      { label: 'Title', value: title },
-      { label: 'Deadline', value: deadlineStr },
-    ],
-  });
-
-  // Automated SMS dispatch to user phone inbox via SIM Gateway
-  try {
-    const recipientPhone = await getUserRecipientPhone(userId);
-    if (recipientPhone) {
-      const smsBody = `LifePilot Alert: New assignment opened: "${title}". ${deadlineStr}. Submit on time!`;
-      await dispatchSmsNotification(userId, recipientPhone, smsBody);
-      logger.info(`[Notification] Dispatched open assignment SMS to ${recipientPhone} for ${title}`);
-    }
-  } catch (smsErr: any) {
-    logger.warn(`[Notification] Failed to dispatch SMS for new assignment: ${smsErr.message}`);
+  const { isEligible, alertType } = isAssignmentOngoingOrMissed(status || 'AVAILABLE', deadline, rawData);
+  if (!isEligible) {
+    // Strictly do not send emails or SMS for submitted/evaluated/upcoming assignments
+    return;
   }
+
+  await sendOngoingOrMissedAssignmentAlert(
+    userId,
+    { id: assignmentId, title, subject, closingDate: deadline, taskId },
+    alertType
+  );
 }
 
 export async function sendPushNotification(
@@ -457,7 +680,8 @@ export async function checkAndCreateDeadlineReminders(): Promise<void> {
 
 /**
  * 12-Hour Automated SMS Reminder:
- * Sends an SMS every 12 hours for all active/pending ERP assignments
+ * Sends an SMS every 12 hours strictly for ONGOING ERP assignments.
+ * Format requirement: "subject name , which assignment , deadline"
  */
 export async function checkAndSend12HourSmsReminders(): Promise<void> {
   const now = new Date();
@@ -474,6 +698,13 @@ export async function checkAndSend12HourSmsReminders(): Promise<void> {
     });
 
     for (const assignment of openAssignments) {
+      const { isEligible, alertType } = isAssignmentOngoingOrMissed(
+        assignment.status,
+        assignment.closingDate,
+        assignment.rawData
+      );
+      if (!isEligible || alertType !== 'ONGOING') continue;
+
       const userId = assignment.erpConnection.userId;
       const recipientPhone = await getUserRecipientPhone(userId);
       if (!recipientPhone) continue;
@@ -489,16 +720,11 @@ export async function checkAndSend12HourSmsReminders(): Promise<void> {
 
       if (recentReminder) continue;
 
-      const deadlineStr = assignment.closingDate
-        ? assignment.closingDate.toLocaleDateString('en-IN', {
-            day: 'numeric',
-            month: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        : 'Soon';
+      const subjectName = assignment.subject || 'Enrolled Subject';
+      const assignmentTitle = assignment.title || 'Assignment';
+      const deadlineStr = formatDeadlineDisplay(assignment.closingDate);
 
-      const smsMessage = `LifePilot 12h Reminder: "${assignment.title}" (${assignment.subject || 'Assignment'}) is pending! Due: ${deadlineStr}. Submit on time!`;
+      const smsMessage = `LifePilot Alert [ONGOING]: Subject: ${subjectName} | Assignment: ${assignmentTitle} | Deadline: ${deadlineStr}. Submit before deadline!`;
 
       await dispatchSmsNotification(userId, recipientPhone, smsMessage);
 
@@ -506,11 +732,11 @@ export async function checkAndSend12HourSmsReminders(): Promise<void> {
         data: {
           assignmentId: assignment.id,
           changeType: 'SMS_12H_REMINDER',
-          changedFields: { recipientPhone, reminderType: '12_HOUR_PERIODIC' },
+          changedFields: { recipientPhone, subjectName, assignmentTitle, deadlineStr, reminderType: '12_HOUR_PERIODIC' },
         },
       });
 
-      logger.info(`[SMS Scheduler] Queued 12h reminder to ${recipientPhone} for assignment ${assignment.title}`);
+      logger.info(`[SMS Scheduler] Queued 12h reminder to ${recipientPhone} for ${subjectName} - ${assignmentTitle}`);
     }
   } catch (err: any) {
     logger.error(`[SMS Scheduler] Error in checkAndSend12HourSmsReminders: ${err.message}`);
@@ -519,7 +745,8 @@ export async function checkAndSend12HourSmsReminders(): Promise<void> {
 
 /**
  * 24-Hour Urgent Deadline SMS Alert:
- * Sends an urgent SMS when an open assignment deadline is less than 24 hours away
+ * Sends an urgent SMS when an open ongoing assignment deadline is less than 24 hours away.
+ * Format requirement: "subject name , which assignment , deadline"
  */
 export async function checkAndSend24HourDeadlineSmsReminders(): Promise<void> {
   const now = new Date();
@@ -538,6 +765,13 @@ export async function checkAndSend24HourDeadlineSmsReminders(): Promise<void> {
     });
 
     for (const assignment of urgentAssignments) {
+      const { isEligible, alertType } = isAssignmentOngoingOrMissed(
+        assignment.status,
+        assignment.closingDate,
+        assignment.rawData
+      );
+      if (!isEligible || alertType !== 'ONGOING') continue;
+
       const userId = assignment.erpConnection.userId;
       const recipientPhone = await getUserRecipientPhone(userId);
       if (!recipientPhone) continue;
@@ -552,16 +786,11 @@ export async function checkAndSend24HourDeadlineSmsReminders(): Promise<void> {
 
       if (alreadySent) continue;
 
-      const deadlineStr = assignment.closingDate
-        ? assignment.closingDate.toLocaleDateString('en-IN', {
-            day: 'numeric',
-            month: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        : 'within 24 hours';
+      const subjectName = assignment.subject || 'Enrolled Subject';
+      const assignmentTitle = assignment.title || 'Assignment';
+      const deadlineStr = formatDeadlineDisplay(assignment.closingDate);
 
-      const smsMessage = `URGENT LifePilot Alert: "${assignment.title}" (${assignment.subject || 'Assignment'}) is due in less than 24 hours (${deadlineStr})! Submit immediately to avoid penalty.`;
+      const smsMessage = `URGENT LifePilot Alert [ONGOING]: Subject: ${subjectName} | Assignment: ${assignmentTitle} | Deadline: ${deadlineStr}. Due in <24h! Submit immediately.`;
 
       await dispatchSmsNotification(userId, recipientPhone, smsMessage);
 
@@ -569,11 +798,11 @@ export async function checkAndSend24HourDeadlineSmsReminders(): Promise<void> {
         data: {
           assignmentId: assignment.id,
           changeType: 'SMS_24H_DEADLINE_REMINDER',
-          changedFields: { recipientPhone, deadline: assignment.closingDate },
+          changedFields: { recipientPhone, subjectName, assignmentTitle, deadline: assignment.closingDate },
         },
       });
 
-      logger.info(`[SMS Scheduler] Queued 24h URGENT deadline SMS to ${recipientPhone} for ${assignment.title}`);
+      logger.info(`[SMS Scheduler] Queued 24h URGENT deadline SMS to ${recipientPhone} for ${subjectName} - ${assignmentTitle}`);
     }
   } catch (err: any) {
     logger.error(`[SMS Scheduler] Error in checkAndSend24HourDeadlineSmsReminders: ${err.message}`);

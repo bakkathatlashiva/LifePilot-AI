@@ -22,12 +22,14 @@ export function DashboardPage() {
   }, [fetchTasks, fetchStats]);
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">{getGreeting(user?.name)}</h1>
-          <p className="text-slate-500 text-sm mt-1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-white truncate">
+            {getGreeting(user?.name)}
+          </h1>
+          <p className="text-slate-400 text-xs sm:text-sm mt-1">
             {format(new Date(), "EEEE, MMMM d, yyyy")} · Let's stay on top of things.
           </p>
         </div>
@@ -35,7 +37,7 @@ export function DashboardPage() {
           <img
             src={user.profilePicture}
             alt={user.name}
-            className="w-12 h-12 rounded-2xl ring-2 ring-purple-500/30"
+            className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl ring-2 ring-purple-500/30 object-cover flex-shrink-0"
           />
         )}
       </div>
@@ -44,16 +46,16 @@ export function DashboardPage() {
       <StatsGrid stats={stats} loading={isLoading} />
 
       {/* Main grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
         {/* Left column: 2/3 */}
-        <div className="xl:col-span-2 space-y-6">
+        <div className="xl:col-span-2 space-y-4 sm:space-y-6 min-w-0">
           <DailyBriefing />
           <UpcomingTasks tasks={tasks} loading={isLoading} />
           <TaskChart stats={stats} />
         </div>
 
         {/* Right column: 1/3 */}
-        <div className="space-y-4">
+        <div className="space-y-4 min-w-0">
           <SmsGatewayWidget />
           <ERPStatus />
           <GmailSyncStatus />
