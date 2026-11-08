@@ -453,13 +453,37 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
       setError('Paste your session cookies');
       return;
     }
-    let parsed;
-    try {
-      parsed = JSON.parse(cookieJson);
-    } catch {
-      setError('Invalid JSON format');
+    let parsed: any[] = [];
+    const text = cookieJson.trim();
+    if (text.startsWith('[') || text.startsWith('{')) {
+      try {
+        const json = JSON.parse(text);
+        parsed = Array.isArray(json) ? json : (json.cookies || [json]);
+      } catch {
+        setError('Invalid JSON format');
+        return;
+      }
+    } else {
+      // Support raw cookie string: "name1=val1; name2=val2"
+      parsed = text
+        .split(';')
+        .map((part) => {
+          const [name, ...valParts] = part.trim().split('=');
+          return {
+            name: name?.trim() || '',
+            value: valParts.join('=').trim(),
+            domain: 'admissions.aurora.edu.in',
+            path: '/',
+          };
+        })
+        .filter((c) => c.name && c.value);
+    }
+
+    if (!parsed || parsed.length === 0) {
+      setError('No valid cookies found. Please paste either cookie string or JSON.');
       return;
     }
+
     setSaving(true);
     setError('');
     try {
@@ -534,15 +558,15 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: () => void }) {
         <div className="space-y-4">
           <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
             <p className="text-blue-300 font-medium text-sm mb-1">Paste Aurora Session Cookies</p>
-            <p className="text-blue-200/70 text-xs">
-              If you prefer not to enter credentials, extract your cookies from Developer Tools (Application → Cookies) and paste them below as JSON.
+            <p className="text-blue-200/70 text-xs leading-relaxed">
+              Log into <span className="text-white font-mono">admissions.aurora.edu.in</span> in another tab. Open Developer Tools (F12) → Console, type <code className="bg-black/30 px-1 py-0.5 rounded text-purple-300">copy(document.cookie)</code> and press Enter. Then paste the copied text here (or paste JSON format).
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">Session Cookies (JSON)</label>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Session Cookies (String or JSON)</label>
             <textarea
               className="w-full bg-dark-800 border border-white/10 rounded-xl p-4 text-slate-100 text-xs font-mono focus:outline-none focus:border-purple-500/60 h-36 resize-none"
-              placeholder='[{"name": "session", "value": "...", "domain": "admissions.aurora.edu.in", "path": "/"}]'
+              placeholder="Paste cookie string (e.g. session=abc; token=xyz...) or JSON array..."
               value={cookieJson}
               onChange={e => setCookieJson(e.target.value)}
             />
