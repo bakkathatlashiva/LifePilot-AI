@@ -29,6 +29,7 @@ import { startWorkers, startCronJobs } from './jobs/scheduler';
 import { valkeyCache } from './config/valkey';
 
 const app = express();
+app.set('trust proxy', 1);
 
 // ─── Security & Middleware ────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
