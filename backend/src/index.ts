@@ -1,4 +1,7 @@
 // backend/src/index.ts
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
+}
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
@@ -120,6 +123,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/telegram', telegramRoutes);
 app.use('/api/preferences', preferenceRoutes);
+app.use('/api/settings/preferences', preferenceRoutes);
 app.use('/api/sms', smsRoutes);
 
 // ─── Error handling ───────────────────────

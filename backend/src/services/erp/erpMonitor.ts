@@ -17,6 +17,10 @@
  * This module NEVER bypasses CAPTCHA, MFA, or access controls.
  */
 
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
+}
+
 import { chromium, Browser, BrowserContext, Page } from "playwright";
 import { prisma } from "../../config/database";
 import { encrypt, decrypt } from "../../utils/encryption";

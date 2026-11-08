@@ -45,7 +45,7 @@ export function SmsGatewayWidget() {
     try {
       const [gwRes, prefsRes] = await Promise.all([
         api.get('/sms/gateway/status'),
-        api.get('/settings/preferences').catch(() => ({ data: { data: {} } })),
+        api.get('/preferences').catch(() => ({ data: { data: {} } })),
       ]);
       const raw = gwRes.data?.data || null;
       if (raw) {
@@ -80,7 +80,7 @@ export function SmsGatewayWidget() {
     if (!newPhone.trim()) return;
     setSavingPhone(true);
     try {
-      await api.patch('/settings/preferences', {
+      await api.patch('/preferences', {
         phoneNumber: newPhone.trim(),
         smsNotificationsEnabled: true,
         smsGatewayEnabled: true,

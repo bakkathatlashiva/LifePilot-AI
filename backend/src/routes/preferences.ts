@@ -17,7 +17,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-router.put('/', async (req: AuthRequest, res: Response) => {
+async function handleUpdatePreferences(req: AuthRequest, res: Response) {
   try {
     const allowedFields = [
       'timezone', 'language', 'theme',
@@ -27,21 +27,29 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       'callCategories', 'erpMonitoringEnabled', 'gmailSyncEnabled',
       'gmailSyncInterval', 'defaultReminderTimes',
       'emailNotificationsEnabled', 'emailCategories', 'emailMinPriority',
+      'smsNotificationsEnabled', 'smsMinPriority',
     ];
 
     const data = Object.fromEntries(
       Object.entries(req.body).filter(([k]) => allowedFields.includes(k))
     );
 
-    const prefs = await prisma.userPreference.update({
+    const prefs = await prisma.userPreference.upsert({
       where: { userId: req.user!.userId },
-      data,
+      create: {
+        userId: req.user!.userId,
+        ...data,
+      },
+      update: data,
     });
 
     return sendSuccess(res, prefs, 'Preferences updated');
   } catch (error) {
     return sendError(res, 'Failed to update preferences');
   }
-});
+}
+
+router.put('/', handleUpdatePreferences);
+router.patch('/', handleUpdatePreferences);
 
 export default router;
