@@ -4,8 +4,11 @@ import { logger } from '../utils/logger';
 
 // Parse connection URL (accepts valkey://, redis://, rediss://)
 const rawUrl = env.VALKEY_URL || env.REDIS_URL || 'redis://127.0.0.1:6379';
-const normalizedUrl = rawUrl.replace(/^valkey:\/\//i, 'redis://');
-const isTls = normalizedUrl.startsWith('rediss://');
+const isTls = rawUrl.startsWith('rediss://') || rawUrl.includes('upstash.io');
+let normalizedUrl = rawUrl.replace(/^valkey:\/\//i, 'redis://');
+if (isTls && normalizedUrl.startsWith('redis://')) {
+  normalizedUrl = normalizedUrl.replace(/^redis:\/\//, 'rediss://');
+}
 
 export const valkeyClient = new Redis(normalizedUrl, {
   maxRetriesPerRequest: null,
