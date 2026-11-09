@@ -46,7 +46,7 @@ export function renderLifePilotEmail(data: EmailTemplateData): { html: string; t
       text += `${d.label}: ${d.value}\n`;
     }
   }
-  text += `\nView in LifePilot AI: ${actionUrl}\n\n`;
+  text += `\n${actionText}: ${actionUrl}\n\n`;
   text += `LifePilot AI - Your Intelligent Academic & Personal Co-Pilot\n`;
 
   // Responsive HTML email

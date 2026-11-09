@@ -93,6 +93,7 @@ export async function runERPSync(
         connection.userId,
         erpConnectionId,
         assignments,
+        connection.erpUrl,
       );
 
       // Remove stale assignments from previous terms that are not in the current term's active assignments
@@ -683,6 +684,7 @@ async function processAssignments(
   userId: string,
   erpConnectionId: string,
   fresh: ERPAssignmentData[],
+  erpUrl?: string,
 ): Promise<{ newCount: number; updatedCount: number }> {
   let newCount = 0;
   let updatedCount = 0;
@@ -857,6 +859,8 @@ async function processAssignments(
             data.subject,
             data.status,
             data.rawData,
+            task?.id,
+            erpUrl,
           ).catch(() => {});
         })
       );

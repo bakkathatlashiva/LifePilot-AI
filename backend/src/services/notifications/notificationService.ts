@@ -115,6 +115,7 @@ export async function sendOngoingOrMissedAssignmentAlert(
     subject?: string | null;
     closingDate?: Date | null;
     taskId?: string | null;
+    erpUrl?: string | null;
   },
   alertType: 'ONGOING' | 'MISSED'
 ): Promise<void> {
@@ -122,6 +123,12 @@ export async function sendOngoingOrMissedAssignmentAlert(
   const assignmentTitle = assignment.title || 'Assignment';
   const deadlineStr = formatDeadlineDisplay(assignment.closingDate);
   const isOngoing = alertType === 'ONGOING';
+
+  // Target ERP assignment portal URL (direct link to the portal assessments page)
+  const erpAssignmentUrl =
+    assignment.erpUrl ||
+    env.AURORA_ERP_URL ||
+    'https://admissions.aurora.edu.in/modules/assessments/assessments';
 
   // 1. In-App Notification
   await prisma.notification.create({
@@ -140,6 +147,8 @@ export async function sendOngoingOrMissedAssignmentAlert(
         subject: subjectName,
         title: assignmentTitle,
         deadline: deadlineStr,
+        erpUrl: erpAssignmentUrl,
+        actionUrl: `${env.FRONTEND_URL}/erp`,
       },
       scheduledAt: new Date(),
     },
@@ -154,6 +163,7 @@ export async function sendOngoingOrMissedAssignmentAlert(
     data: {
       type: isOngoing ? 'ONGOING_ASSIGNMENT' : 'MISSED_ASSIGNMENT',
       assignmentId: assignment.id,
+      url: erpAssignmentUrl,
     },
   }).catch((err) => logger.warn(`[Notification] Push notification warning: ${err.message}`));
 
@@ -163,8 +173,8 @@ export async function sendOngoingOrMissedAssignmentAlert(
     : `⚠️ [MISSED] ${subjectName} - ${assignmentTitle} | Due: ${deadlineStr}`;
 
   const emailMessage = isOngoing
-    ? `An ongoing assignment requires your action:\n\n• Subject Name: ${subjectName}\n• Which Assignment: ${assignmentTitle}\n• Deadline: ${deadlineStr}\n\nPlease complete and submit on your portal before the deadline.`
-    : `A missed assignment was detected on your portal:\n\n• Subject Name: ${subjectName}\n• Which Assignment: ${assignmentTitle}\n• Deadline: ${deadlineStr} (Passed)\n\nPlease review your portal immediately.`;
+    ? `An ongoing assignment requires your action:\n\n• Subject Name: ${subjectName}\n• Which Assignment: ${assignmentTitle}\n• Deadline: ${deadlineStr}\n\nPlease click "Open Assignment in ERP" below to view and complete it directly on your portal before the deadline.`
+    : `A missed assignment was detected on your portal:\n\n• Subject Name: ${subjectName}\n• Which Assignment: ${assignmentTitle}\n• Deadline: ${deadlineStr} (Passed)\n\nPlease click "Open Assignment in ERP" below to review on your official portal immediately.`;
 
   await dispatchEmailNotification(userId, {
     taskId: assignment.taskId || undefined,
@@ -173,14 +183,15 @@ export async function sendOngoingOrMissedAssignmentAlert(
     category: 'COLLEGE_ASSIGNMENT',
     priority: isOngoing ? 'HIGH' : 'CRITICAL',
     dueDate: assignment.closingDate ?? undefined,
-    actionUrl: `${env.FRONTEND_URL}/tasks`,
-    actionText: isOngoing ? 'Open Assignment in LifePilot' : 'Review Missed Assignment',
+    actionUrl: erpAssignmentUrl,
+    actionText: 'Open Assignment in ERP',
     badgeText: isOngoing ? 'ONGOING' : 'MISSED',
     details: [
       { label: 'Subject Name', value: subjectName },
       { label: 'Which Assignment', value: assignmentTitle },
       { label: 'Deadline', value: deadlineStr },
       { label: 'Status', value: isOngoing ? 'Ongoing (Pending Submission)' : 'Missed (Overdue)' },
+      { label: 'ERP Portal', value: 'admissions.aurora.edu.in' },
     ],
   }).catch((err) => logger.warn(`[Notification] Email dispatch warning: ${err.message}`));
 
@@ -223,6 +234,7 @@ export async function checkAndDispatchOngoingAndMissedAlerts(
 
   const assignments = await prisma.eRPAssignment.findMany({
     where: { erpConnectionId: { in: connectionIds } },
+    include: { erpConnection: { select: { erpUrl: true } } },
   });
 
   for (const a of assignments) {
@@ -285,7 +297,18 @@ export async function checkAndDispatchOngoingAndMissedAlerts(
       if (recentAlert) continue;
     }
 
-    await sendOngoingOrMissedAssignmentAlert(userId, a, alertType);
+    await sendOngoingOrMissedAssignmentAlert(
+      userId,
+      {
+        id: a.id,
+        title: a.title,
+        subject: a.subject,
+        closingDate: a.closingDate,
+        taskId: a.taskId,
+        erpUrl: a.erpConnection?.erpUrl,
+      },
+      alertType
+    );
 
     await prisma.assignmentHistory.create({
       data: {
@@ -378,6 +401,7 @@ export async function notifyNewAssignment(
   status?: string | null,
   rawData?: any,
   taskId?: string | null,
+  erpUrl?: string | null,
 ): Promise<void> {
   const { isEligible, alertType } = isAssignmentOngoingOrMissed(status || 'AVAILABLE', deadline, rawData);
   if (!isEligible) {
@@ -398,7 +422,7 @@ export async function notifyNewAssignment(
 
   await sendOngoingOrMissedAssignmentAlert(
     userId,
-    { id: assignmentId, title, subject, closingDate: deadline, taskId },
+    { id: assignmentId, title, subject, closingDate: deadline, taskId, erpUrl },
     alertType
   );
 
