@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, AlertCircle, CheckCircle2, Clock, ChevronRight, Info, Settings } from 'lucide-react';
+import {
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  ChevronRight,
+  Info,
+  Settings,
+  KeyRound,
+  Cookie,
+  ExternalLink,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -457,11 +470,25 @@ function AssignmentDetail({ assignment: a }: { assignment: ERPAssignment }) {
 }
 
 function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[]) => void }) {
+  const [activeTab, setActiveTab] = useState<'credentials' | 'cookies'>('credentials');
+
+  // Credentials tab state
   const [username, setUsername] = useState('252U1R9175');
   const [password, setPassword] = useState('');
+
+  // Cookies tab state
+  const [rawCookies, setRawCookies] = useState('');
+  const [copiedSnippet, setCopiedSnippet] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  const handleCopyCommand = () => {
+    navigator.clipboard.writeText('copy(document.cookie)');
+    setCopiedSnippet(true);
+    setTimeout(() => setCopiedSnippet(false), 2500);
+  };
 
   const handleCredentialsLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -487,8 +514,34 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[
       if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
         setError('Portal response was slow, but if credentials were valid your monitor is starting. Please wait a moment.');
       } else {
-        setError(e.response?.data?.message ?? 'Failed to connect. Please verify your Student ID/Email and Password.');
+        const serverMsg = e.response?.data?.message || e.response?.data?.error;
+        setError(serverMsg || e.message || 'Failed to connect. Please verify your Student ID/Email and Password.');
       }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCookiesLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedCookies = rawCookies.trim();
+    if (!trimmedCookies) {
+      setError('Please paste your session cookies string or JSON from admissions.aurora.edu.in');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      const res = await api.post('/erp/session', { rawCookies: trimmedCookies }, { timeout: 30000 });
+      const assignments = res.data?.data?.assignments;
+      setSuccessMsg(res.data.message || 'Connected with session cookies! Assignments loaded.');
+      setTimeout(() => {
+        onSuccess(assignments);
+      }, 400);
+    } catch (e: any) {
+      const serverMsg = e.response?.data?.message || e.response?.data?.error;
+      setError(serverMsg || e.message || 'Failed to authenticate using session cookies. Please ensure they are fresh.');
     } finally {
       setSaving(false);
     }
@@ -496,40 +549,136 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[
 
   return (
     <div className="space-y-5">
-      <form onSubmit={handleCredentialsLogin} className="space-y-4">
-        <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
-          <p className="text-purple-300 font-medium text-sm mb-1">Direct Student Portal Authentication</p>
-          <p className="text-purple-200/70 text-xs leading-relaxed">
-            Enter your Aurora ERP credentials. LifePilot verifies your account at admissions.aurora.edu.in, encrypts your session, and starts automated background monitoring across all enrolled subjects.
-          </p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-1.5">Student User ID / Email / Hall Ticket</label>
-          <input
-            type="text"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            placeholder="Enter Student ID / Roll Number or Email"
-            className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-base sm:text-sm min-h-[44px] focus:outline-none focus:border-purple-500/60 font-mono"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Enter your ERP portal password"
-            className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-base sm:text-sm min-h-[44px] focus:outline-none focus:border-purple-500/60"
-          />
-          <p className="text-[11px] text-slate-400 mt-1">Supports Student Roll Number or Registered Email Address · Password is case-sensitive.</p>
-        </div>
-        {error && <p className="text-red-400 text-sm">{error}</p>}
-        {successMsg && <p className="text-emerald-400 text-sm">{successMsg}</p>}
-        <Button type="submit" loading={saving} className="w-full min-h-[48px] text-sm font-semibold">
-          {saving ? 'Verifying Credentials...' : 'Authenticate & Sync ERP'}
-        </Button>
-      </form>
+      {/* Tab Switcher */}
+      <div className="grid grid-cols-2 gap-2 p-1 bg-dark-800/80 border border-white/10 rounded-2xl">
+        <button
+          type="button"
+          onClick={() => { setActiveTab('credentials'); setError(''); setSuccessMsg(''); }}
+          className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-medium transition-all ${
+            activeTab === 'credentials'
+              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <KeyRound className="w-4 h-4" />
+          <span>Student ID & Pass</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveTab('cookies'); setError(''); setSuccessMsg(''); }}
+          className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-medium transition-all relative ${
+            activeTab === 'cookies'
+              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Cookie className="w-4 h-4" />
+          <span>Session Cookies</span>
+          <span className="hidden sm:inline-block ml-1 text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-full font-mono">
+            Fast
+          </span>
+        </button>
+      </div>
+
+      {activeTab === 'credentials' ? (
+        <form onSubmit={handleCredentialsLogin} className="space-y-4">
+          <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
+            <p className="text-purple-300 font-medium text-sm mb-1">Direct Student Portal Authentication</p>
+            <p className="text-purple-200/70 text-xs leading-relaxed">
+              Enter your Aurora ERP credentials. LifePilot verifies your account at admissions.aurora.edu.in, encrypts your session, and starts automated background monitoring across all enrolled subjects.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Student User ID / Email / Hall Ticket</label>
+            <input
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder="Enter Student ID / Roll Number or Email"
+              className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-base sm:text-sm min-h-[44px] focus:outline-none focus:border-purple-500/60 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="Enter your ERP portal password"
+              className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-base sm:text-sm min-h-[44px] focus:outline-none focus:border-purple-500/60"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">Supports Student Roll Number or Registered Email Address · Password is case-sensitive.</p>
+          </div>
+          {error && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl space-y-1">
+              <p className="text-red-400 text-sm">{error}</p>
+              <p className="text-xs text-slate-400">
+                Tip: If Cloudflare or your cloud server IP restricts automated login, switch to the <strong>Session Cookies</strong> tab above to connect in 1 second!
+              </p>
+            </div>
+          )}
+          {successMsg && <p className="text-emerald-400 text-sm">{successMsg}</p>}
+          <Button type="submit" loading={saving} className="w-full min-h-[48px] text-sm font-semibold">
+            {saving ? 'Verifying Credentials...' : 'Authenticate & Sync ERP'}
+          </Button>
+        </form>
+      ) : (
+        <form onSubmit={handleCookiesLogin} className="space-y-4">
+          <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Cookie className="w-4 h-4 text-emerald-400" />
+              <p className="text-emerald-300 font-semibold text-sm">100% Cloud-Compatible Session Connection</p>
+            </div>
+            <p className="text-emerald-200/80 text-xs leading-relaxed mb-3">
+              Directly connects with your active Aurora session cookies. Bypasses all Cloudflare WAF, CAPTCHAs, or datacenter IP restrictions with <strong>0.3s ultra-fast sync</strong>!
+            </p>
+
+            <div className="bg-black/30 rounded-xl p-3 text-xs text-slate-300 space-y-1.5 border border-white/5">
+              <p className="font-medium text-slate-200">How to get your cookies in 10 seconds:</p>
+              <ol className="list-decimal list-inside space-y-1 text-slate-300/90 text-[11px] leading-relaxed">
+                <li>
+                  Open <a href="https://admissions.aurora.edu.in" target="_blank" rel="noreferrer" className="text-purple-400 underline inline-flex items-center gap-0.5">admissions.aurora.edu.in <ExternalLink className="w-3 h-3" /></a> and ensure you are logged in.
+                </li>
+                <li>Press <kbd className="bg-slate-700 px-1 py-0.5 rounded text-[10px]">F12</kbd> (or right click → Inspect) and open the <strong>Console</strong> tab.</li>
+                <li>
+                  Type or click here to copy command:
+                  <button
+                    type="button"
+                    onClick={handleCopyCommand}
+                    className="ml-1.5 inline-flex items-center gap-1 bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/30 px-2 py-0.5 rounded text-[10px] font-mono transition-all"
+                  >
+                    {copiedSnippet ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedSnippet ? 'Copied to clipboard!' : 'copy(document.cookie)'}</span>
+                  </button>
+                </li>
+                <li>Paste in Console and press Enter. Your cookies will be automatically copied to your clipboard!</li>
+              </ol>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium text-slate-300">Paste Session Cookies</label>
+              <span className="text-[11px] text-slate-400">Accepts string, JSON, or DevTools export</span>
+            </div>
+            <textarea
+              rows={4}
+              value={rawCookies}
+              onChange={e => setRawCookies(e.target.value)}
+              placeholder="connect.sid=s%3A...; csrf_token=... (or paste JSON array from Cookie-Editor)"
+              className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-xs font-mono min-h-[90px] focus:outline-none focus:border-purple-500/60"
+            />
+          </div>
+
+          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {successMsg && <p className="text-emerald-400 text-sm">{successMsg}</p>}
+
+          <Button type="submit" loading={saving} className="w-full min-h-[48px] text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white">
+            {saving ? 'Verifying Session Cookies...' : 'Save Cookies & Sync ERP'}
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

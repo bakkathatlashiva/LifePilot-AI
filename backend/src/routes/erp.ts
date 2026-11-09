@@ -2,7 +2,12 @@ import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { prisma } from '../config/database';
 import { sendSuccess, sendError } from '../utils/apiResponse';
-import { saveERPSession, runERPSync, authenticateAndSyncWithCredentials } from '../services/erp/erpMonitor';
+import {
+  saveERPSession,
+  runERPSync,
+  authenticateAndSyncWithCredentials,
+  authenticateAndSyncWithCookies,
+} from '../services/erp/erpMonitor';
 import { erpQueue } from '../jobs/scheduler';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
@@ -67,26 +72,29 @@ router.post('/connect-credentials', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Save session cookies from frontend (alternative/advanced option)
+// Connect and authenticate via session cookies (direct fast-path, 100% Cloudflare-proof)
 router.post('/session', async (req: AuthRequest, res: Response) => {
   try {
-    const { cookies, erpUrl } = req.body;
-    if (!cookies || !Array.isArray(cookies)) {
-      return sendError(res, 'cookies array is required', 400);
+    const { cookies, rawCookies, erpUrl } = req.body;
+    const cookiePayload = rawCookies !== undefined ? rawCookies : cookies;
+    if (!cookiePayload) {
+      return sendError(res, 'Session cookies are required', 400);
     }
 
-    const connectionId = await saveERPSession(
+    const result = await authenticateAndSyncWithCookies(
       req.user!.userId,
-      erpUrl ?? env.AURORA_ERP_URL,
-      cookies
+      cookiePayload,
+      erpUrl ?? env.AURORA_ERP_URL
     );
 
-    // Also trigger sync in background
-    runERPSync(connectionId).catch((err) => logger.error('[ERP Sync] Error:', err));
-
-    return sendSuccess(res, { connectionId }, 'ERP session saved. Sync started.', 201);
+    return sendSuccess(
+      res,
+      result,
+      `Connected via Session Cookies! Synced ${result.assignmentCount} assignments.`,
+      200
+    );
   } catch (error: any) {
-    return sendError(res, error.message || 'Failed to save ERP session');
+    return sendError(res, error.message || 'Failed to authenticate with session cookies', 400);
   }
 });
 

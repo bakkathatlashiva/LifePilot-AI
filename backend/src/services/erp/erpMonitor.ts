@@ -267,20 +267,28 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
   }
 
   // Allow Next.js client hydration and CSRF initialization to complete
-  await page.waitForSelector('#credential', { timeout: 8000 });
+  await page.waitForSelector('#credential', { timeout: 10000 });
   await Promise.race([
-    page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}),
-    page.waitForTimeout(800),
+    page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {}),
+    page.waitForTimeout(1000),
   ]);
 
+  // Click, clear, and fill inputs with full React event dispatch
+  await page.click('#credential');
   await page.fill('#credential', cleanUser);
-  await page.fill('#password', cleanPass);
-  await page.waitForTimeout(200);
+  await page.dispatchEvent('#credential', 'input');
+  await page.dispatchEvent('#credential', 'change');
 
-  // Set up response listener directly for Aurora auth API
+  await page.click('#password');
+  await page.fill('#password', cleanPass);
+  await page.dispatchEvent('#password', 'input');
+  await page.dispatchEvent('#password', 'change');
+  await page.waitForTimeout(300);
+
+  // Set up response listener directly for Aurora auth API (15s to allow for geolocation resolution)
   const authResponsePromise = page.waitForResponse(
     (res) => res.url().includes('/api/auth/login'),
-    { timeout: 10000 }
+    { timeout: 15000 }
   ).catch(() => null);
 
   await page.click('button[type="submit"]');
@@ -1105,5 +1113,145 @@ export async function authenticateAndSyncWithCredentials(
     }
     throw err;
   }
+}
+
+/**
+ * Robust parser that normalizes any cookie format (document.cookie string, DevTools JSON, Cookie-Editor array)
+ * into an array of { name, value, domain, path }.
+ */
+export function parseCookieInput(input: any): Array<{ name: string; value: string; domain: string; path: string }> {
+  if (!input) return [];
+
+  // 1. Array of cookie objects (e.g. from Cookie-Editor / EditThisCookie)
+  if (Array.isArray(input)) {
+    return input
+      .map((c: any) => ({
+        name: String(c.name || c.key || '').trim(),
+        value: String(c.value || '').trim(),
+        domain: c.domain || '.aurora.edu.in',
+        path: c.path || '/',
+      }))
+      .filter((c) => c.name && c.value);
+  }
+
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+
+    // 2. JSON array or JSON object string
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parseCookieInput(parsed);
+        }
+        if (parsed && typeof parsed === 'object') {
+          if (Array.isArray(parsed.cookies)) {
+            return parseCookieInput(parsed.cookies);
+          }
+          return Object.entries(parsed)
+            .map(([name, value]) => ({
+              name: name.trim(),
+              value: String(value).trim(),
+              domain: '.aurora.edu.in',
+              path: '/',
+            }))
+            .filter((c) => c.name && c.value);
+        }
+      } catch {}
+    }
+
+    // 3. Standard document.cookie string: "name1=val1; name2=val2; ..."
+    const pairs = trimmed.split(';');
+    const results: Array<{ name: string; value: string; domain: string; path: string }> = [];
+    for (const pair of pairs) {
+      const idx = pair.indexOf('=');
+      if (idx > 0) {
+        const name = pair.slice(0, idx).trim();
+        const value = pair.slice(idx + 1).trim();
+        if (name && value) {
+          results.push({ name, value, domain: '.aurora.edu.in', path: '/' });
+        }
+      }
+    }
+    return results;
+  }
+
+  return [];
+}
+
+/**
+ * Authenticate directly via session cookies.
+ * 1. Verifies the cookies live against Aurora student-portal assessment API.
+ * 2. Saves the verified cookies encrypted to DB.
+ * 3. Immediately returns parsed assignments in ~300ms without Playwright.
+ */
+export async function authenticateAndSyncWithCookies(
+  userId: string,
+  rawCookies: any,
+  erpUrl: string = env.AURORA_ERP_URL
+): Promise<{ connectionId: string; assignments: any[]; assignmentCount: number }> {
+  const cookies = parseCookieInput(rawCookies);
+  if (!cookies || cookies.length === 0) {
+    throw new Error('No valid cookies found in input. Please paste your session cookies (e.g. from document.cookie or Cookie-Editor).');
+  }
+
+  logger.info(`[ERP] Authenticating user ${userId} with ${cookies.length} session cookies...`);
+
+  // Direct fast-path check against Aurora student-portal assessments API
+  const rawAssignments = await fetchAssessmentsDirectApi(cookies);
+  if (!rawAssignments) {
+    throw new Error(
+      'Session cookies were rejected by Aurora portal (expired or missing connect.sid). Please log in to admissions.aurora.edu.in and copy fresh cookies.'
+    );
+  }
+
+  const connectionId = await saveERPSession(userId, erpUrl, cookies);
+
+  const formattedAssignments = rawAssignments.map((a) => ({
+    id: a.erpId,
+    erpId: a.erpId,
+    title: a.title,
+    subject: a.subject,
+    description: a.description,
+    openingDate: a.openingDate ? a.openingDate.toISOString() : undefined,
+    closingDate: a.closingDate ? a.closingDate.toISOString() : undefined,
+    status: a.status,
+    maxMarks: a.maxMarks,
+    rawData: a.rawData,
+    isNew: false,
+    isNotified: false,
+    createdAt: new Date().toISOString(),
+    history: [],
+  }));
+
+  await valkeyCache.del(`valkey:erp:status:${userId}`).catch(() => {});
+  await valkeyCache.delPattern('valkey:erp:*').catch(() => {});
+  await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
+  await valkeyCache.set(
+    `valkey:erp:assignments:${userId}:ALL:1:100:false`,
+    { assignments: formattedAssignments, total: formattedAssignments.length, page: 1, pageSize: 100 },
+    60
+  ).catch(() => {});
+
+  // Asynchronously process and persist to PostgreSQL
+  (async () => {
+    try {
+      await processAssignments(userId, connectionId, rawAssignments);
+      await prisma.eRPConnection.update({
+        where: { id: connectionId },
+        data: { lastSyncStatus: 'SUCCESS', lastSyncAt: new Date(), lastSyncError: null },
+      });
+      await valkeyCache.del(`valkey:erp:status:${userId}`).catch(() => {});
+    } catch (err) {
+      logger.error('[ERP] Background persistence error with session cookies:', err);
+    }
+  })();
+
+  logger.info(`[ERP] Successfully verified session cookies! Loaded ${formattedAssignments.length} assignments.`);
+  return {
+    connectionId,
+    assignments: formattedAssignments,
+    assignmentCount: formattedAssignments.length,
+  };
 }
 
