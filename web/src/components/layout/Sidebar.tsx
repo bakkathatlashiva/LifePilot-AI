@@ -104,6 +104,15 @@ export function Sidebar({
           >
             <item.icon className="w-5 h-5 flex-shrink-0" size={19} />
             {(!collapsed || mobileOpen) && <span className="text-sm font-medium">{item.label}</span>}
+            {(item.to === '/erp' || item.to === '/gmail') && (
+              <span className={cn(
+                'flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full ml-auto',
+                collapsed && 'md:absolute md:top-1.5 md:right-1.5 md:w-2 md:h-2 md:p-0 md:rounded-full md:bg-emerald-400 md:border-0'
+              )}>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {(!collapsed || mobileOpen) && '24/7'}
+              </span>
+            )}
             {item.to === '/notifications' && unreadCount > 0 && (
               <span className={cn(
                 'bg-red-500 text-white text-xs font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center leading-none',

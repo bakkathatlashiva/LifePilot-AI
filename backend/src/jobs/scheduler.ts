@@ -165,8 +165,14 @@ export function startCronJobs() {
     );
   });
 
-  // Initial checks on startup
-  setTimeout(() => {
+  // Reset any stuck RUNNING statuses from previous server restarts
+  prisma.eRPConnection.updateMany({
+    where: { lastSyncStatus: 'RUNNING' },
+    data: { lastSyncStatus: 'SUCCESS', lastSyncError: null },
+  }).catch(() => {});
+
+  // Initial checks and 24/7 background sync triggers on startup
+  setTimeout(async () => {
     checkAndDispatchAllOngoingAndMissedAlerts().catch((err) =>
       logger.error('[Scheduler] Initial ongoing/missed alerts check failed:', err)
     );
@@ -176,9 +182,42 @@ export function startCronJobs() {
     checkAndSend12HourSmsReminders().catch((err) =>
       logger.error('[Scheduler] Initial 12h SMS reminder check failed:', err)
     );
+
+    // Initial 24/7 background ERP sync on boot
+    try {
+      const activeConnections = await prisma.eRPConnection.findMany({
+        where: { isActive: true },
+        select: { id: true, userId: true },
+      });
+      for (const conn of activeConnections) {
+        logger.info(`[Startup 24/7] Triggering initial background ERP sync for ${conn.id}...`);
+        runERPSync(conn.id).catch((err) =>
+          logger.error(`[Startup 24/7] ERP sync error: ${err.message}`)
+        );
+      }
+    } catch (e: any) {
+      logger.error(`[Startup 24/7] ERP startup check error: ${e.message}`);
+    }
+
+    // Initial 24/7 background Gmail sync on boot
+    try {
+      const gmailUsers = await prisma.connectedAccount.findMany({
+        where: { provider: { in: ['google_gmail', 'google_auth'] }, isActive: true },
+        select: { userId: true },
+        distinct: ['userId'],
+      });
+      for (const { userId } of gmailUsers) {
+        logger.info(`[Startup 24/7] Triggering initial background Gmail sync for user ${userId}...`);
+        syncGmail(userId).catch((err) =>
+          logger.error(`[Startup 24/7] Gmail sync error: ${err.message}`)
+        );
+      }
+    } catch (e: any) {
+      logger.error(`[Startup 24/7] Gmail startup check error: ${e.message}`);
+    }
   }, 4000);
 
-  // Schedule automated ERP syncs: evaluates every minute against each connection's configured interval
+  // 24/7 Automated ERP syncs: evaluates every minute against each connection's configured interval
   cron.schedule('* * * * *', async () => {
     try {
       const activeConnections = await prisma.eRPConnection.findMany({
@@ -187,42 +226,70 @@ export function startCronJobs() {
 
       const now = Date.now();
       for (const conn of activeConnections) {
-        if (conn.lastSyncStatus === 'RUNNING') continue;
+        // Reclaim stale RUNNING status (if in RUNNING state for > 3 minutes, server was likely reloaded)
+        const isStaleRunning =
+          conn.lastSyncStatus === 'RUNNING' &&
+          conn.updatedAt &&
+          now - new Date(conn.updatedAt).getTime() > 3 * 60 * 1000;
 
-        const intervalMinutes = conn.monitoringInterval || 30;
+        if (conn.lastSyncStatus === 'RUNNING' && !isStaleRunning) {
+          continue;
+        }
+
+        if (isStaleRunning) {
+          logger.warn(`[ERP 24/7 Cron] Reclaiming stale RUNNING sync for connection ${conn.id}`);
+          await prisma.eRPConnection.update({
+            where: { id: conn.id },
+            data: { lastSyncStatus: 'SUCCESS', lastSyncError: null },
+          }).catch(() => {});
+        }
+
+        const intervalMinutes = conn.monitoringInterval || 5;
         const intervalMs = intervalMinutes * 60 * 1000;
         const lastSync = conn.lastSyncAt ? new Date(conn.lastSyncAt).getTime() : 0;
         const elapsed = now - lastSync;
 
-        if (elapsed >= intervalMs) {
+        if (elapsed >= intervalMs || isStaleRunning) {
           logger.info(
-            `[ERP Auto-Sync Cron] Interval of ${intervalMinutes}m reached (elapsed: ${Math.round(elapsed / 60000)}m). Starting background sync for connection ${conn.id}...`
+            `[ERP 24/7 Cron] Interval of ${intervalMinutes}m reached (elapsed: ${Math.round(elapsed / 60000)}m). Running 24/7 background sync for connection ${conn.id}...`
           );
 
-          // Direct background execution guarantees immediate execution
+          // Direct background execution guarantees 24/7 continuous monitoring across all pages
           runERPSync(conn.id).catch((err) => {
-            logger.error(`[ERP Auto-Sync Cron] Error syncing connection ${conn.id}:`, err);
+            logger.error(`[ERP 24/7 Cron] Error syncing connection ${conn.id}:`, err);
           });
         }
       }
     } catch (err) {
-      logger.error('[ERP Auto-Sync Cron] Check error:', err);
+      logger.error('[ERP 24/7 Cron] Check error:', err);
     }
   });
 
-  // Schedule Gmail syncs
-  cron.schedule('*/15 * * * *', async () => {
-    const users = await prisma.connectedAccount.findMany({
-      where: { provider: 'google_gmail', isActive: true },
-      select: { userId: true },
-      distinct: ['userId'],
-    });
+  // 24/7 Automated Gmail syncs (runs every 5 minutes in background across all pages)
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const users = await prisma.connectedAccount.findMany({
+        where: { provider: { in: ['google_gmail', 'google_auth'] }, isActive: true },
+        select: { userId: true },
+        distinct: ['userId'],
+      });
 
-    for (const { userId } of users) {
-      const prefs = await prisma.userPreference.findUnique({ where: { userId }, select: { gmailSyncEnabled: true } });
-      if (prefs?.gmailSyncEnabled) {
-        await gmailQueue.add('sync', { userId }, { jobId: `gmail-${userId}-${Date.now()}` });
+      for (const { userId } of users) {
+        const prefs = await prisma.userPreference.findUnique({
+          where: { userId },
+          select: { gmailSyncEnabled: true },
+        });
+
+        // Default to enabled if no preference record is set
+        if (prefs?.gmailSyncEnabled ?? true) {
+          logger.info(`[Gmail 24/7 Cron] Triggering 24/7 background sync for user ${userId}...`);
+          syncGmail(userId).catch((err) =>
+            logger.error(`[Gmail 24/7 Cron] Error syncing user ${userId}:`, err)
+          );
+        }
       }
+    } catch (err: any) {
+      logger.error(`[Gmail 24/7 Cron] Error: ${err.message}`);
     }
   });
 

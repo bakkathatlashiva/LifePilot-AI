@@ -125,6 +125,15 @@ export function AppLayout() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* 24/7 Cloud Background Services Pill */}
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[11px] font-semibold"
+              title="ERP & Gmail monitored 24/7 autonomously in background across all views"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>24/7 Active</span>
+            </div>
+
             {/* Quick notifications access */}
             <button
               onClick={() => navigate('/notifications')}
@@ -177,13 +186,37 @@ export function AppLayout() {
       {/* Main Content Area */}
       <main
         className={cn(
-          'flex-1 min-h-screen transition-all duration-300 overflow-x-hidden',
+          'flex-1 min-h-screen transition-all duration-300 overflow-x-hidden flex flex-col',
           'pt-[calc(3.5rem+env(safe-area-inset-top,0px))] md:pt-0',
           'pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]',
           collapsed ? 'md:ml-16' : 'md:ml-64'
         )}
       >
-        <div className="max-w-7xl mx-auto p-3.5 sm:p-5 md:p-6 lg:p-8">
+        {/* Desktop 24/7 Background Cloud Services Bar */}
+        <div className="hidden md:flex items-center justify-between px-6 py-2.5 border-b border-white/5 bg-dark-900/50 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>24/7 Background Cloud Monitoring Active</span>
+            </div>
+            <span className="text-xs text-slate-500 hidden lg:inline">
+              ERP portal & Gmail are continuously monitored across all pages and when closed
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2.5 text-xs text-slate-400">
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-dark-800 border border-white/5">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+              <span>ERP: Every 5m</span>
+            </span>
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-dark-800 border border-white/5">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              <span>Gmail: Every 5m</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="max-w-7xl mx-auto p-3.5 sm:p-5 md:p-6 lg:p-8 flex-1 w-full">
           <PageErrorBoundary>
             <Outlet />
           </PageErrorBoundary>

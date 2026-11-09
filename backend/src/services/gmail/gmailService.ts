@@ -17,9 +17,13 @@ function getAuthClient(accessToken: string, refreshToken?: string) {
 }
 
 export async function syncGmail(userId: string): Promise<void> {
-  const account = await prisma.connectedAccount.findFirst({
-    where: { userId, provider: 'google_gmail', isActive: true },
-  });
+  const account =
+    (await prisma.connectedAccount.findFirst({
+      where: { userId, provider: 'google_gmail', isActive: true },
+    })) ??
+    (await prisma.connectedAccount.findFirst({
+      where: { userId, provider: 'google_auth', isActive: true },
+    }));
 
   if (!account) {
     logger.warn(`[Gmail] No Gmail account connected for user ${userId}`);

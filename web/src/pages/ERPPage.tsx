@@ -166,24 +166,25 @@ export function ERPPage() {
         </div>
       </div>
 
-      {/* ERP Status Notice */}
-      <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+      {/* ERP 24/7 Status Notice */}
+      <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
         <div className="flex gap-3">
-          <Info className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center flex-shrink-0 text-emerald-400 mt-0.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+          </div>
           <div>
-            <p className="text-purple-300 font-medium text-sm">Aurora University ERP Live Integration</p>
-            <p className="text-purple-200/70 text-xs mt-1 leading-relaxed">
-              LifePilot monitors your official student portal at{' '}
+            <p className="text-emerald-300 font-semibold text-sm">24/7 Autonomous ERP Cloud Monitoring Active</p>
+            <p className="text-emerald-200/75 text-xs mt-1 leading-relaxed">
+              LifePilot runs continuous 24/7 cloud monitoring on{' '}
               <a
                 href="https://admissions.aurora.edu.in/modules/assessments/assessments"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="underline text-purple-400 hover:text-purple-300"
+                className="underline text-emerald-300 hover:text-emerald-100 font-medium"
               >
                 admissions.aurora.edu.in
               </a>{' '}
-              every {conn?.monitoringInterval ?? 30} minutes using authenticated Playwright automation.
-              Newly published assessments, upcoming deadlines, status transitions, and marks across all enrolled courses are automatically synchronized and converted into prioritized tasks.
+              every {conn?.monitoringInterval ?? 5} minutes. You <strong>do not need to stay on this page</strong> or keep your browser open — new assignments and deadlines are automatically synced and alerted via SMS & Gmail 24 hours a day, 7 days a week.
             </p>
           </div>
         </div>
@@ -229,7 +230,11 @@ export function ERPPage() {
             }
             dot
           >
-            {conn?.isActive ? conn?.lastSyncStatus ?? 'Not started' : 'Inactive'}
+            {conn?.isActive
+              ? conn?.lastSyncStatus === 'RUNNING'
+                ? 'Syncing...'
+                : '24/7 Active'
+              : 'Inactive'}
           </Badge>
           {conn?.lastSyncAt && (
             <p className="text-xs text-slate-500 mt-2">Last sync: {formatRelative(conn.lastSyncAt)}</p>

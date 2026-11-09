@@ -57,7 +57,11 @@ export function ERPStatus() {
     }
   };
 
-  useEffect(() => { fetchStatus(); }, []);
+  useEffect(() => {
+    fetchStatus();
+    const timer = setInterval(fetchStatus, 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const conn = data?.connection;
   const statusVariant =
@@ -69,8 +73,8 @@ export function ERPStatus() {
     <Card>
       <CardHeader
         title="ERP Monitor"
-        subtitle="Aurora University"
-        icon={<Activity className="w-5 h-5" />}
+        subtitle="Aurora University · 24/7 Background Sync"
+        icon={<Activity className="w-5 h-5 text-purple-400" />}
         action={
           <Button variant="ghost" size="sm" onClick={() => navigate('/erp')}
             rightIcon={<ChevronRight className="w-3.5 h-3.5" />}>
@@ -96,7 +100,7 @@ export function ERPStatus() {
                 <Clock className="w-4 h-4 text-slate-500" />
               )}
               <Badge variant={statusVariant} dot>
-                {conn.lastSyncStatus ?? 'Never synced'}
+                {conn.lastSyncStatus === 'RUNNING' ? 'Syncing...' : '24/7 Active'}
               </Badge>
             </div>
             <Button

@@ -19,7 +19,11 @@ export function GmailSyncStatus() {
     } catch {}
   };
 
-  useEffect(() => { fetch(); }, []);
+  useEffect(() => {
+    fetch();
+    const timer = setInterval(fetch, 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const sync = async () => {
     setSyncing(true);
@@ -37,7 +41,8 @@ export function GmailSyncStatus() {
     <Card>
       <CardHeader
         title="Gmail Intelligence"
-        icon={<Mail className="w-5 h-5" />}
+        subtitle="24/7 Mailbox Monitoring & AI Analysis"
+        icon={<Mail className="w-5 h-5 text-blue-400" />}
         action={
           <Button variant="ghost" size="sm" onClick={() => navigate('/gmail')}
             rightIcon={<ChevronRight className="w-3.5 h-3.5" />}>
@@ -54,7 +59,7 @@ export function GmailSyncStatus() {
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <Badge variant="success" dot>Connected</Badge>
+            <Badge variant="success" dot>24/7 Active</Badge>
             <Button variant="ghost" size="sm" onClick={sync} loading={syncing}
               leftIcon={<RefreshCw className="w-3.5 h-3.5" />}>Sync</Button>
           </div>

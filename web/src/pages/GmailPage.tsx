@@ -209,16 +209,18 @@ export function GmailPage() {
       ) : (
         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center flex-shrink-0 text-emerald-400">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            </div>
             <div className="min-w-0">
-              <p className="text-emerald-300 font-semibold text-sm">Real Mailbox Connected & Synchronized</p>
-              <p className="text-emerald-200/70 text-xs mt-0.5 truncate sm:whitespace-normal">
-                LifePilot automatically scans your inbox every 15 minutes for new course and exam emails.
+              <p className="text-emerald-300 font-semibold text-sm">24/7 Autonomous Gmail Cloud Monitoring Active</p>
+              <p className="text-emerald-200/75 text-xs mt-0.5 truncate sm:whitespace-normal">
+                LifePilot scans your mailbox 24/7 in the background every 5 minutes. You do not need to remain on this page.
               </p>
             </div>
           </div>
           <Badge variant="success" dot className="flex-shrink-0">
-            Active
+            24/7 Active
           </Badge>
         </div>
       )}
