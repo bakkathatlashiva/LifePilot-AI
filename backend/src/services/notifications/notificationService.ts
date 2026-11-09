@@ -229,32 +229,75 @@ export async function checkAndDispatchOngoingAndMissedAlerts(
     const { isEligible, alertType } = isAssignmentOngoingOrMissed(a.status, a.closingDate, a.rawData);
     if (!isEligible) continue;
 
-    const historyType = alertType === 'MISSED' ? 'ALERT_MISSED_AUTO' : 'ALERT_ONGOING_AUTO';
-    const cooldownHours = alertType === 'MISSED' ? 24 : 12;
-    const cooldownThreshold = new Date(now.getTime() - cooldownHours * 60 * 60 * 1000);
+    if (alertType === 'MISSED') {
+      // User requirement: "missed assignments just send one time notification dont send daily through sms or gmail"
+      // Check if a MISSED alert was EVER sent in AssignmentHistory (strictly ONE-TIME, never repeat daily)
+      const alreadySentHistory = await prisma.assignmentHistory.findFirst({
+        where: {
+          assignmentId: a.id,
+          changeType: 'ALERT_MISSED_AUTO',
+        },
+      });
 
-    const recentAlert = await prisma.assignmentHistory.findFirst({
-      where: {
-        assignmentId: a.id,
-        changeType: historyType,
-        detectedAt: { gte: cooldownThreshold },
-      },
-    });
+      if (alreadySentHistory) {
+        continue;
+      }
 
-    if (recentAlert) continue;
+      // Check if a MISSED notification was ever recorded in Notification table
+      const alreadySentNotification = await prisma.notification.findFirst({
+        where: {
+          userId,
+          title: { contains: '[MISSED]' },
+          OR: [
+            { taskId: a.taskId || undefined },
+            { body: { contains: a.title } },
+          ],
+        },
+      });
+
+      if (alreadySentNotification) {
+        // Backfill history so subsequent passes skip instantly
+        await prisma.assignmentHistory.create({
+          data: {
+            assignmentId: a.id,
+            changeType: 'ALERT_MISSED_AUTO',
+            changedFields: {
+              alertType: 'MISSED',
+              title: a.title,
+              backfilled: true,
+              reason: 'Already notified earlier',
+            },
+          },
+        }).catch(() => {});
+        continue;
+      }
+    } else {
+      // ONGOING assignments: 12-hour reminder interval so active tasks remain visible without spamming
+      const cooldownThreshold = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+      const recentAlert = await prisma.assignmentHistory.findFirst({
+        where: {
+          assignmentId: a.id,
+          changeType: 'ALERT_ONGOING_AUTO',
+          detectedAt: { gte: cooldownThreshold },
+        },
+      });
+
+      if (recentAlert) continue;
+    }
 
     await sendOngoingOrMissedAssignmentAlert(userId, a, alertType);
 
     await prisma.assignmentHistory.create({
       data: {
         assignmentId: a.id,
-        changeType: historyType,
+        changeType: alertType === 'MISSED' ? 'ALERT_MISSED_AUTO' : 'ALERT_ONGOING_AUTO',
         changedFields: {
           alertType,
           subject: a.subject,
           title: a.title,
           deadline: a.closingDate,
           dispatchedAt: now.toISOString(),
+          oneTimeOnly: alertType === 'MISSED',
         },
       },
     }).catch(() => {});
@@ -342,11 +385,39 @@ export async function notifyNewAssignment(
     return;
   }
 
+  // Strictly enforce one-time notification for missed assignments
+  if (alertType === 'MISSED') {
+    const alreadySentMissed = await prisma.assignmentHistory.findFirst({
+      where: {
+        assignmentId,
+        changeType: 'ALERT_MISSED_AUTO',
+      },
+    });
+    if (alreadySentMissed) return;
+  }
+
   await sendOngoingOrMissedAssignmentAlert(
     userId,
     { id: assignmentId, title, subject, closingDate: deadline, taskId },
     alertType
   );
+
+  // Immediately record in history to prevent duplicate sends from subsequent sweeps
+  await prisma.assignmentHistory.create({
+    data: {
+      assignmentId,
+      changeType: alertType === 'MISSED' ? 'ALERT_MISSED_AUTO' : 'ALERT_ONGOING_AUTO',
+      changedFields: {
+        alertType,
+        subject,
+        title,
+        deadline,
+        source: 'notifyNewAssignment',
+        dispatchedAt: new Date().toISOString(),
+        oneTimeOnly: alertType === 'MISSED',
+      },
+    },
+  }).catch(() => {});
 }
 
 export async function sendPushNotification(
@@ -596,7 +667,7 @@ export async function checkAndCreateDeadlineReminders(): Promise<void> {
     }
   }
 
-  // 3. Automated Overdue Alert Sweep: Notify on overdue tasks (once every 24h)
+  // 3. Automated Overdue Alert Sweep: Notify on overdue tasks (Strictly ONE-TIME, never daily)
   const overdueTasks = await prisma.task.findMany({
     where: {
       deadline: { lt: now },
@@ -607,13 +678,18 @@ export async function checkAndCreateDeadlineReminders(): Promise<void> {
 
   for (const ot of overdueTasks) {
     if (!ot.deadline) continue;
+
+    // College/ERP assignments are strictly handled by checkAndDispatchOngoingAndMissedAlerts
+    // with standardized subject/assignment/deadline formatting. Do not send duplicate emails here.
+    if (ot.category === 'COLLEGE_ASSIGNMENT') continue;
+
+    // For any other manual task: check if an overdue alert was EVER sent (strictly ONE-TIME, never daily)
     const existingOverdue = await prisma.notification.findFirst({
       where: {
         userId: ot.userId,
         taskId: ot.id,
         type: 'EMAIL',
         title: { contains: 'Overdue' },
-        createdAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
       },
     });
 
