@@ -7,7 +7,7 @@ services:
     rootDir: backend
     buildCommand: npm install --include=dev && npx prisma generate && npx playwright install chromium chromium-headless-shell && npm run build
     startCommand: npx prisma migrate deploy && npm start
-    healthCheckPath: /health
+    healthCheckPath: /api/health
     envVars:
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: 0
@@ -46,5 +46,19 @@ services:
       - key: AURORA_ERP_USER
         sync: false
       - key: AURORA_ERP_PASSWORD
+        sync: false
+
+  - type: web
+    name: lifepilot-ai-web
+    env: static
+    rootDir: web
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
         sync: false
 
