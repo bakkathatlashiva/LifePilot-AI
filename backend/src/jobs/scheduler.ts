@@ -14,6 +14,15 @@ import { prisma } from '../config/database';
 import { emailQueue, emailWorker } from '../queues/email.queue';
 import cron from 'node-cron';
 
+const lastWarnTimes: Record<string, number> = {};
+function logThrottledWarning(key: string, msg: string) {
+  const now = Date.now();
+  if (!lastWarnTimes[key] || now - lastWarnTimes[key] > 30000) {
+    lastWarnTimes[key] = now;
+    logger.warn(msg);
+  }
+}
+
 // ─── Queues ───────────────────────────────
 export const erpQueue = new Queue('erp-sync', {
   connection: redis,
@@ -24,7 +33,7 @@ export const erpQueue = new Queue('erp-sync', {
     removeOnFail: 50,
   },
 });
-erpQueue.on('error', (err) => logger.warn(`[ERP Queue] Redis warning: ${err.message}`));
+erpQueue.on('error', (err) => logThrottledWarning('erpQueue', `[ERP Queue] Redis warning: ${err.message}`));
 
 export const gmailQueue = new Queue('gmail-sync', {
   connection: redis,
@@ -35,7 +44,7 @@ export const gmailQueue = new Queue('gmail-sync', {
     removeOnFail: 50,
   },
 });
-gmailQueue.on('error', (err) => logger.warn(`[Gmail Queue] Redis warning: ${err.message}`));
+gmailQueue.on('error', (err) => logThrottledWarning('gmailQueue', `[Gmail Queue] Redis warning: ${err.message}`));
 
 export const notificationQueue = new Queue('notifications', {
   connection: redis,
@@ -46,7 +55,7 @@ export const notificationQueue = new Queue('notifications', {
     removeOnFail: 100,
   },
 });
-notificationQueue.on('error', (err) => logger.warn(`[Notif Queue] Redis warning: ${err.message}`));
+notificationQueue.on('error', (err) => logThrottledWarning('notifQueue', `[Notif Queue] Redis warning: ${err.message}`));
 
 // ─── Workers ──────────────────────────────
 export function startWorkers() {
@@ -77,9 +86,9 @@ export function startWorkers() {
     { connection: redis, concurrency: 1 }
   );
 
-  erpWorker.on('error', (err) => logger.warn(`[ERP Worker] Redis warning: ${err.message}`));
-  gmailWorker.on('error', (err) => logger.warn(`[Gmail Worker] Redis warning: ${err.message}`));
-  notifWorker.on('error', (err) => logger.warn(`[Notif Worker] Redis warning: ${err.message}`));
+  erpWorker.on('error', (err) => logThrottledWarning('erpWorker', `[ERP Worker] Redis warning: ${err.message}`));
+  gmailWorker.on('error', (err) => logThrottledWarning('gmailWorker', `[Gmail Worker] Redis warning: ${err.message}`));
+  notifWorker.on('error', (err) => logThrottledWarning('notifWorker', `[Notif Worker] Redis warning: ${err.message}`));
 
   erpWorker.on('failed', (job, err) => logger.error(`[ERP Worker] Job ${job?.id} failed:`, err));
   gmailWorker.on('failed', (job, err) => logger.error(`[Gmail Worker] Job ${job?.id} failed:`, err));

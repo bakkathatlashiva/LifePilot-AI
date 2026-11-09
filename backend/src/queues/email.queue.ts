@@ -19,8 +19,13 @@ export const emailQueue = new Queue('email-notifications', {
   },
 });
 
+let lastEmailQueueWarnTime = 0;
 emailQueue.on('error', (err) => {
-  logger.warn(`[Email Queue] Redis warning: ${err.message}`);
+  const now = Date.now();
+  if (now - lastEmailQueueWarnTime > 30000) {
+    lastEmailQueueWarnTime = now;
+    logger.warn(`[Email Queue] Redis warning: ${err.message}`);
+  }
 });
 
 // --------------------------------------------------------------------------
@@ -47,8 +52,13 @@ export const emailWorker = new Worker(
   },
 );
 
+let lastEmailWorkerWarnTime = 0;
 emailWorker.on('error', (err) => {
-  logger.warn(`[Email Worker] Redis warning: ${err.message}`);
+  const now = Date.now();
+  if (now - lastEmailWorkerWarnTime > 30000) {
+    lastEmailWorkerWarnTime = now;
+    logger.warn(`[Email Worker] Redis warning: ${err.message}`);
+  }
 });
 
 emailWorker.on('failed', (job, err) => {

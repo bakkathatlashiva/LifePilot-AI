@@ -30,7 +30,7 @@ import preferenceRoutes from './routes/preferences';
 import smsRoutes from './routes/sms';
 
 import { startWorkers, startCronJobs } from './jobs/scheduler';
-import { valkeyCache } from './config/valkey';
+import { valkeyCache, getIsValkeyConnected } from './config/valkey';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -103,14 +103,13 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get(['/health', '/api/health'], async (req: Request, res: Response) => {
-  const valkeyHealthy = await valkeyCache.isHealthy().catch(() => false);
-  res.json({
+app.get(['/health', '/api/health'], (req: Request, res: Response) => {
+  res.status(200).json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     env: env.NODE_ENV,
     version: '1.0.0',
-    valkey: valkeyHealthy ? 'connected' : 'disconnected',
+    valkey: getIsValkeyConnected() ? 'connected' : 'disconnected',
   });
 });
 

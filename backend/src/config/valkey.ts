@@ -22,6 +22,7 @@ export const valkeyClient = new Redis(normalizedUrl, {
 });
 
 let isValkeyConnected = false;
+let lastErrorLogTime = 0;
 
 valkeyClient.on('connect', async () => {
   try {
@@ -39,8 +40,16 @@ valkeyClient.on('connect', async () => {
 
 valkeyClient.on('error', (err) => {
   isValkeyConnected = false;
-  logger.warn(`Valkey/Redis warning (non-fatal): ${err.message}`);
+  const now = Date.now();
+  if (now - lastErrorLogTime > 30000) {
+    lastErrorLogTime = now;
+    logger.warn(`Valkey/Redis warning (non-fatal): ${err.message} (background retry active)`);
+  }
 });
+
+export function getIsValkeyConnected(): boolean {
+  return isValkeyConnected && valkeyClient.status === 'ready';
+}
 
 /**
  * High-performance Cache & Storage Service powered by Valkey
@@ -51,6 +60,7 @@ export const valkeyCache = {
    * Get cached JSON object or value
    */
   async get<T = any>(key: string): Promise<T | null> {
+    if (!getIsValkeyConnected()) return null;
     try {
       const data = await valkeyClient.get(key);
       if (!data) return null;
@@ -64,6 +74,7 @@ export const valkeyCache = {
    * Set cached value with optional TTL (in seconds)
    */
   async set(key: string, value: any, ttlSeconds?: number): Promise<boolean> {
+    if (!getIsValkeyConnected()) return false;
     try {
       const serialized = JSON.stringify(value);
       if (ttlSeconds && ttlSeconds > 0) {
@@ -82,7 +93,7 @@ export const valkeyCache = {
    * Delete one or more keys
    */
   async del(...keys: string[]): Promise<number> {
-    if (keys.length === 0) return 0;
+    if (!getIsValkeyConnected() || keys.length === 0) return 0;
     try {
       return await valkeyClient.del(...keys);
     } catch {
@@ -94,6 +105,7 @@ export const valkeyCache = {
    * Delete all keys matching a pattern using non-blocking SCAN
    */
   async delPattern(pattern: string): Promise<number> {
+    if (!getIsValkeyConnected()) return 0;
     try {
       let cursor = '0';
       let deletedCount = 0;
@@ -114,6 +126,7 @@ export const valkeyCache = {
    * Check if a JWT access token is blacklisted / revoked
    */
   async isTokenBlacklisted(token: string): Promise<boolean> {
+    if (!getIsValkeyConnected()) return false;
     try {
       const exists = await valkeyClient.exists(`valkey:bl:${token.slice(-32)}`);
       return exists === 1;
@@ -126,6 +139,7 @@ export const valkeyCache = {
    * Blacklist a JWT access token upon user logout until expiry
    */
   async blacklistToken(token: string, ttlSeconds: number = 900): Promise<void> {
+    if (!getIsValkeyConnected()) return;
     try {
       await valkeyClient.set(`valkey:bl:${token.slice(-32)}`, '1', 'EX', ttlSeconds);
     } catch (err: any) {
@@ -134,11 +148,17 @@ export const valkeyCache = {
   },
 
   /**
-   * Health check for Valkey connection
+   * Health check for Valkey connection (Never hangs even if disconnected)
    */
   async isHealthy(): Promise<boolean> {
+    if (!getIsValkeyConnected()) {
+      return false;
+    }
     try {
-      const res = await valkeyClient.ping();
+      const res = await Promise.race([
+        valkeyClient.ping(),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 500)),
+      ]);
       return res === 'PONG';
     } catch {
       return false;
