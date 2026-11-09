@@ -222,9 +222,32 @@ function parseStoredSession(sessionCookiesEncrypted: string | null): {
   return { cookies: [], credentials: null };
 }
 
+function getBrowserContextOptions() {
+  const isLinux = process.platform !== 'win32';
+  const userAgent = isLinux
+    ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+  const platform = isLinux ? '"Linux"' : '"Windows"';
+
+  return {
+    userAgent,
+    viewport: { width: 1280, height: 720 },
+    locale: 'en-US',
+    permissions: ['geolocation'] as ['geolocation'],
+    geolocation: { latitude: 17.3850, longitude: 78.4867 },
+    extraHTTPHeaders: {
+      'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': platform,
+      'Accept-Language': 'en-IN,en-GB,en;q=0.9,en-US;q=0.8',
+    },
+  };
+}
+
 /**
  * Helper to perform robust and fast Aurora ERP login.
- * Listens directly to Aurora's auth API for immediate (< 1.5s) verification.
+ * Listens directly to Aurora's auth API for immediate verification.
  */
 async function performAuroraLogin(page: Page, user: string, pass: string): Promise<boolean> {
   const trimmedUser = user.trim();
@@ -233,24 +256,31 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
 
   logger.info(`[ERP Login] Attempting fast login for ${cleanUser}...`);
 
-  // Block heavy assets (images, fonts) to load login page in < 300ms
+  // Block heavy media assets to ensure fast page responsiveness
   await page.route(/\.(png|jpg|jpeg|svg|woff|woff2|webp)(\?.*)?$/i, (route) => route.abort());
 
   if (!page.url().includes('login')) {
     await page.goto('https://admissions.aurora.edu.in/login', {
       waitUntil: 'domcontentloaded',
-      timeout: 12000,
+      timeout: 15000,
     });
   }
 
-  await page.waitForSelector('#credential', { timeout: 6000 });
+  // Allow Next.js client hydration and CSRF initialization to complete
+  await page.waitForSelector('#credential', { timeout: 8000 });
+  await Promise.race([
+    page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}),
+    page.waitForTimeout(800),
+  ]);
+
   await page.fill('#credential', cleanUser);
   await page.fill('#password', cleanPass);
+  await page.waitForTimeout(200);
 
   // Set up response listener directly for Aurora auth API
   const authResponsePromise = page.waitForResponse(
     (res) => res.url().includes('/api/auth/login'),
-    { timeout: 7000 }
+    { timeout: 10000 }
   ).catch(() => null);
 
   await page.click('button[type="submit"]');
@@ -262,7 +292,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
 
     if (status === 200) {
       // Login successful! Brief pause to let cookies settle in context
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(300);
       return true;
     }
 
@@ -270,6 +300,28 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
       const data = await authRes.json().catch(() => null);
       const msg = data?.error || data?.message || 'Invalid ERP credentials. Please check your Student User ID and Password.';
       throw new Error(msg);
+    }
+
+    if (status === 403) {
+      const rawText = await authRes.text().catch(() => '');
+      logger.warn(`[ERP Login] Auth API returned 403 Forbidden. Body preview: ${rawText.slice(0, 300)}`);
+
+      let parsedData: any = null;
+      try { parsedData = JSON.parse(rawText); } catch {}
+
+      if (parsedData?.error || parsedData?.message) {
+        throw new Error(`Aurora ERP: ${parsedData.error || parsedData.message}`);
+      }
+
+      if (rawText.includes('Cloudflare') || rawText.includes('Attention Required') || rawText.includes('Access denied') || rawText.includes('cf-ray')) {
+        throw new Error('Aurora ERP security (Cloudflare WAF) blocked this cloud server IP. Please save your browser session or contact portal administrator.');
+      }
+
+      if (rawText.toLowerCase().includes('csrf')) {
+        throw new Error('Aurora ERP security token (CSRF) validation failed. Please try logging in again.');
+      }
+
+      throw new Error('Aurora ERP authentication was rejected (HTTP 403 Forbidden).');
     }
   }
 
@@ -333,17 +385,13 @@ async function scrapeAssignments(
       ],
     });
 
-    const context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 720 },
-      locale: 'en-US',
-      permissions: ['geolocation'],
-      geolocation: { latitude: 17.3850, longitude: 78.4867 },
-    });
+    const context = await browser.newContext(getBrowserContextOptions());
 
     await context.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      // @ts-ignore
+      window.chrome = { runtime: {} };
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
     });
 
     const page = await context.newPage();
@@ -455,6 +503,11 @@ export function parseApiAssessmentItems(rawItems: any[]): ERPAssignmentData[] {
 async function fetchAssessmentsDirectApi(cookies: any[]): Promise<ERPAssignmentData[] | null> {
   if (!cookies || cookies.length === 0) return null;
   const cookieString = cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+  const isLinux = process.platform !== 'win32';
+  const userAgent = isLinux
+    ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
@@ -462,11 +515,11 @@ async function fetchAssessmentsDirectApi(cookies: any[]): Promise<ERPAssignmentD
       method: 'GET',
       headers: {
         'Cookie': cookieString,
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'User-Agent': userAgent,
         'Accept': 'application/json, text/plain, */*',
         'Origin': 'https://admissions.aurora.edu.in',
         'Referer': 'https://admissions.aurora.edu.in/',
+        'Accept-Language': 'en-IN,en-GB,en;q=0.9,en-US;q=0.8',
       },
       signal: controller.signal,
     });
@@ -973,17 +1026,13 @@ export async function authenticateAndSyncWithCredentials(
   });
 
   try {
-    const context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 720 },
-      locale: 'en-US',
-      permissions: ['geolocation'],
-      geolocation: { latitude: 17.3850, longitude: 78.4867 },
-    });
+    const context = await browser.newContext(getBrowserContextOptions());
 
     await context.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      // @ts-ignore
+      window.chrome = { runtime: {} };
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
     });
 
     const page = await context.newPage();
