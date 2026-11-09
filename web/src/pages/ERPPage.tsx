@@ -1,74 +1,53 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { RefreshCw, AlertCircle, CheckCircle2, Clock, ChevronRight, Info, Settings } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState } from '../components/ui/EmptyState';
+import { PageLoader } from '../components/ui/LoadingSpinner';
 import { ERPAssignment } from '../types';
 import { formatDeadline, formatRelative } from '../lib/utils';
 import api from '../lib/api';
 import { format } from 'date-fns';
+import { useERPStore } from '../store/erpStore';
 
 export function ERPPage() {
-  const [status, setStatus] = useState<any>(null);
-  const [allAssignments, setAllAssignments] = useState<ERPAssignment[]>([]);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
+  const {
+    assignments: allAssignments,
+    status,
+    monitoringInterval,
+    filterTab,
+    isSyncing,
+    isLoading,
+    fetchAssignments,
+    pollSyncStatus,
+    triggerSync,
+    updateInterval,
+    setFilterTab,
+    setAssignments,
+  } = useERPStore();
+
   const [showSetup, setShowSetup] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<ERPAssignment | null>(null);
-  const [interval, setIntervalVal] = useState(30);
+  const [interval, setIntervalVal] = useState(monitoringInterval || 5);
   const [savedInterval, setSavedInterval] = useState(false);
-  const [filterTab, setFilterTab] = useState<'ALL' | 'AVAILABLE' | 'CLOSED'>('ALL');
 
-  // Load all assignments once or silently in the background
-  const fetchAssignmentsData = useCallback(async (isSilent = false) => {
-    if (!isSilent) setInitialLoading(true);
-    try {
-      const [statusRes, assignmentsRes] = await Promise.all([
-        api.get('/erp/status'),
-        api.get('/erp/assignments?pageSize=100'),
-      ]);
-      setStatus(statusRes.data.data);
-      const activeAssignments = (assignmentsRes.data.data.assignments ?? []).filter(
-        (a: ERPAssignment) => a.status !== 'UPCOMING'
-      );
-      setAllAssignments(activeAssignments);
-      if (statusRes.data.data.connection?.monitoringInterval) {
-        setIntervalVal(statusRes.data.data.connection.monitoringInterval);
-      }
-    } catch {
-      // Keep existing data on error without crashing
-    } finally {
-      if (!isSilent) setInitialLoading(false);
-    }
-  }, []);
-
-  // Lightweight status check for background sync polling (avoids fetching 100 assignments repeatedly)
-  const pollSyncStatus = useCallback(async () => {
-    try {
-      const res = await api.get('/erp/status');
-      const latestStatus = res.data.data;
-      setStatus(latestStatus);
-      const currentSyncStatus = latestStatus?.connection?.lastSyncStatus;
-      // If sync completed or failed, refresh assignments once and stop spinning
-      if (currentSyncStatus === 'SUCCESS' || currentSyncStatus === 'FAILED') {
-        setSyncing(false);
-        fetchAssignmentsData(true);
-      }
-    } catch {
-      // Ignore transient polling error
-    }
-  }, [fetchAssignmentsData]);
-
-  // Initial load
+  // Sync internal input state with store monitoringInterval
   useEffect(() => {
-    fetchAssignmentsData(false);
-  }, [fetchAssignmentsData]);
+    if (monitoringInterval) {
+      setIntervalVal(monitoringInterval);
+    }
+  }, [monitoringInterval]);
 
-  // Fast & efficient polling only while active sync is genuinely executing
+  // Initial load: 0ms instant display from store/localStorage, then silent background revalidation
   useEffect(() => {
-    const isRunning = status?.connection?.lastSyncStatus === 'RUNNING' || syncing;
+    fetchAssignments(allAssignments.length > 0);
+  }, [fetchAssignments, allAssignments.length]);
+
+  // Fast & efficient polling only while active sync is executing
+  useEffect(() => {
+    const isRunning = status?.connection?.lastSyncStatus === 'RUNNING' || isSyncing;
     if (!isRunning) return;
 
     let pollCount = 0;
@@ -77,7 +56,6 @@ export function ERPPage() {
     const timer = setInterval(() => {
       pollCount++;
       if (pollCount > maxPolls) {
-        setSyncing(false);
         clearInterval(timer);
         return;
       }
@@ -85,33 +63,37 @@ export function ERPPage() {
     }, 1500);
 
     return () => clearInterval(timer);
-  }, [status?.connection?.lastSyncStatus, syncing, pollSyncStatus]);
+  }, [status?.connection?.lastSyncStatus, isSyncing, pollSyncStatus]);
 
   // Instantaneous zero-lag client-side tab switching
   const handleFilterChange = (tab: 'ALL' | 'AVAILABLE' | 'CLOSED') => {
     setFilterTab(tab);
   };
 
-  const triggerSync = async () => {
-    setSyncing(true);
+  const handleTriggerSync = async () => {
     try {
-      await api.post('/erp/sync');
-      setTimeout(() => pollSyncStatus(), 600);
+      await triggerSync();
     } catch (e: any) {
       alert(e.response?.data?.message ?? 'Sync failed');
-      setSyncing(false);
     }
   };
 
-  const updateInterval = async () => {
-    try {
-      await api.put('/erp/settings', { monitoringInterval: interval });
+  const handleUpdateInterval = async () => {
+    const success = await updateInterval(interval);
+    if (success) {
       setSavedInterval(true);
       setTimeout(() => setSavedInterval(false), 3000);
-      fetchAssignmentsData(true);
-    } catch (e: any) {
-      alert(e.response?.data?.message ?? 'Update failed');
+    } else {
+      alert('Update failed');
     }
+  };
+
+  const handleSetupSuccess = (newAssignments?: ERPAssignment[]) => {
+    setShowSetup(false);
+    if (newAssignments && newAssignments.length > 0) {
+      setAssignments(newAssignments);
+    }
+    fetchAssignments(true);
   };
 
   // Memoized assignment metrics (computes once in O(N), avoiding 4x array filtering on re-render)
@@ -145,7 +127,7 @@ export function ERPPage() {
   }, [allAssignments, filterTab]);
 
   const conn = status?.connection;
-  const isSyncActive = conn?.lastSyncStatus === 'RUNNING' || syncing;
+  const isSyncActive = conn?.lastSyncStatus === 'RUNNING' || isSyncing;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -159,7 +141,7 @@ export function ERPPage() {
             Setup
           </Button>
           {conn && (
-            <Button onClick={triggerSync} loading={isSyncActive} leftIcon={<RefreshCw className="w-4 h-4" />}>
+            <Button onClick={handleTriggerSync} loading={isSyncActive} leftIcon={<RefreshCw className="w-4 h-4" />}>
               Sync Now
             </Button>
           )}
@@ -261,7 +243,7 @@ export function ERPPage() {
               className="w-20 bg-dark-800 border border-white/10 rounded-xl px-3 py-2 text-slate-100 text-sm focus:outline-none focus:border-purple-500/60"
             />
             <span className="text-slate-500 text-sm">min</span>
-            <Button size="sm" variant="outline" onClick={updateInterval}>Save</Button>
+            <Button size="sm" variant="outline" onClick={handleUpdateInterval}>Save</Button>
           </div>
           {savedInterval && (
             <p className="text-emerald-400 text-xs mt-2 flex items-center gap-1 animate-fade-in">
@@ -326,7 +308,7 @@ export function ERPPage() {
       </div>
 
       {/* Assignments list */}
-      {initialLoading && allAssignments.length === 0 ? (
+      {isLoading && allAssignments.length === 0 ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-24 bg-dark-900 rounded-2xl animate-pulse border border-white/5" />
@@ -347,7 +329,7 @@ export function ERPPage() {
           }
           action={
             conn
-              ? { label: isSyncActive ? 'Syncing...' : 'Sync Now', onClick: triggerSync }
+              ? { label: isSyncActive ? 'Syncing...' : 'Sync Now', onClick: handleTriggerSync }
               : { label: 'Setup ERP', onClick: () => setShowSetup(true) }
           }
         />
@@ -361,15 +343,7 @@ export function ERPPage() {
 
       {/* Setup Modal */}
       <Modal isOpen={showSetup} onClose={() => setShowSetup(false)} title="ERP Session Setup" size="lg">
-        <ERPSetupGuide
-          onSuccess={(immediateAssignments) => {
-            setShowSetup(false);
-            if (immediateAssignments && immediateAssignments.length > 0) {
-              setAllAssignments(immediateAssignments);
-            }
-            fetchAssignmentsData(true);
-          }}
-        />
+        <ERPSetupGuide onSuccess={handleSetupSuccess} />
       </Modal>
 
       {/* Detail Modal */}

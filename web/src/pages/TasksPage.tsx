@@ -90,7 +90,7 @@ export function TasksPage() {
       </Card>
 
       {/* Task list */}
-      {isLoading ? (
+      {isLoading && tasks.length === 0 ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-20 bg-dark-900 rounded-2xl animate-pulse border border-white/5" />

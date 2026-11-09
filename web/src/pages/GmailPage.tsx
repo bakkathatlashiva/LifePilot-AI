@@ -23,17 +23,25 @@ import { Modal } from '../components/ui/Modal';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Input } from '../components/ui/Input';
 import { SuggestedTask, Email } from '../types';
-import api, { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL } from '../lib/api';
 import { formatRelative } from '../lib/utils';
+import { useGmailStore } from '../store/gmailStore';
 
 export function GmailPage() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'suggestions' | 'emails'>('suggestions');
-  const [suggestions, setSuggestions] = useState<SuggestedTask[]>([]);
-  const [emails, setEmails] = useState<Email[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [status, setStatus] = useState<any>(null);
+  const {
+    suggestions,
+    emails,
+    status,
+    activeTab,
+    isSyncing,
+    isLoading,
+    setActiveTab,
+    fetchAll,
+    handleSync: triggerStoreSync,
+    approveSuggestion,
+    rejectSuggestion,
+  } = useGmailStore();
 
   // Interaction feedback states
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -45,37 +53,16 @@ export function GmailPage() {
   const [editForm, setEditForm] = useState({ title: '', deadline: '' });
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
 
-  const fetchAll = async () => {
-    setLoading(true);
-    try {
-      const [sugRes, emailRes, statusRes] = await Promise.all([
-        api.get('/gmail/suggestions'),
-        api.get('/gmail/emails?pageSize=50'),
-        api.get('/gmail/status'),
-      ]);
-      setSuggestions(sugRes.data.data ?? []);
-      setEmails(emailRes.data.data ?? []);
-      setStatus(statusRes.data.data);
-    } catch {
-      // Keep state resilient on transient network issues
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Initial load: 0ms instant display from store/localStorage, then silent background revalidation
   useEffect(() => {
-    fetchAll();
-  }, []);
+    fetchAll(suggestions.length > 0 || emails.length > 0);
+  }, [fetchAll, suggestions.length, emails.length]);
 
   const handleSync = async () => {
-    setSyncing(true);
     try {
-      await api.post('/gmail/sync');
-      setTimeout(fetchAll, 4000);
+      await triggerStoreSync();
     } catch (e: any) {
       alert(e.response?.data?.message ?? 'Sync failed');
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -84,13 +71,11 @@ export function GmailPage() {
     window.location.href = `${API_BASE_URL}/auth/google/gmail?returnTo=${returnTo}`;
   };
 
-  const approveSuggestion = async (id: string, overrides?: Record<string, unknown>) => {
+  const handleApprove = async (id: string, overrides?: Record<string, unknown>) => {
     setApprovingId(id);
     try {
-      const res = await api.post(`/gmail/suggestions/${id}/approve`, overrides ?? {});
-      const createdTask = res.data?.data;
       const targetItem = suggestions.find((s) => s.id === id);
-      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      const createdTask = await approveSuggestion(id, overrides);
       setSuccessToast({
         title: (overrides?.title as string) || targetItem?.title || 'Academic Task',
         taskId: createdTask?.id,
@@ -103,11 +88,10 @@ export function GmailPage() {
     }
   };
 
-  const rejectSuggestion = async (id: string) => {
+  const handleReject = async (id: string) => {
     setRejectingId(id);
     try {
-      await api.post(`/gmail/suggestions/${id}/reject`);
-      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      await rejectSuggestion(id);
     } catch (e: any) {
       alert(e.response?.data?.message ?? 'Failed to reject suggestion');
     } finally {
@@ -139,7 +123,7 @@ export function GmailPage() {
           {isConnected ? (
             <Button
               onClick={handleSync}
-              loading={syncing}
+              loading={isSyncing}
               leftIcon={<RefreshCw className="w-4 h-4" />}
               className="w-full sm:w-auto min-h-[44px] justify-center text-sm font-medium"
             >
@@ -245,7 +229,7 @@ export function GmailPage() {
       </div>
 
       {/* Main Content Area */}
-      {loading ? (
+      {isLoading && suggestions.length === 0 && emails.length === 0 ? (
         <div className="space-y-3">
           {[...Array(3)].map((_, i) => (
             <div key={i} className="h-32 bg-dark-900 rounded-2xl animate-pulse border border-white/5" />
@@ -275,8 +259,8 @@ export function GmailPage() {
                 suggestion={s}
                 isApproving={approvingId === s.id}
                 isRejecting={rejectingId === s.id}
-                onApprove={() => approveSuggestion(s.id)}
-                onReject={() => rejectSuggestion(s.id)}
+                onApprove={() => handleApprove(s.id)}
+                onReject={() => handleReject(s.id)}
                 onEdit={() => openEdit(s)}
               />
             ))}
@@ -322,7 +306,7 @@ export function GmailPage() {
             <Button
               onClick={() => {
                 if (editingSuggestion) {
-                  approveSuggestion(editingSuggestion.id, {
+                  handleApprove(editingSuggestion.id, {
                     title: editForm.title,
                     deadline: editForm.deadline ? new Date(editForm.deadline).toISOString() : undefined,
                   });
