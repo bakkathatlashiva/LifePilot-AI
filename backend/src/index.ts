@@ -5,6 +5,7 @@ if (process.platform !== 'win32' && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
 }
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -87,6 +88,15 @@ app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev', {
   stream: { write: (msg) => logger.http(msg.trim()) },
 }));
 app.use(generalLimiter);
+
+// ─── Static Files & Verification ────────────
+const publicDir = path.join(__dirname, '../public');
+app.use(express.static(publicDir));
+
+// Explicit route for Google Search Console HTML verification
+app.get('/google9da971b5644f9a64.html', (req: Request, res: Response) => {
+  res.type('text/html').send('google-site-verification: google9da971b5644f9a64.html');
+});
 
 // ─── Health Check & Root ────────────────────
 app.get('/', (req, res) => {
