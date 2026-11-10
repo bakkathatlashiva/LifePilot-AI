@@ -1,192 +1,528 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  RefreshControl, Alert, ActivityIndicator
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../lib/api';
 import { format, isPast } from 'date-fns';
+import { Task } from '../types';
+import { colors } from '../theme/colors';
+import { AppHeader } from '../components/ui/AppHeader';
+import { AppDrawer } from '../components/navigation/AppDrawer';
+import { Card } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
+import { Input, Select } from '../components/ui/Input';
+import { Modal } from '../components/ui/Modal';
+import { EmptyState } from '../components/ui/EmptyState';
+import { TaskForm } from '../components/tasks/TaskForm';
+import { useNavigation } from '@react-navigation/native';
 
-interface Task {
-  id: string;
-  title: string;
-  category: string;
-  deadline?: string;
-  priority: string;
-  status: string;
-  description?: string;
-}
+const STATUS_FILTERS = [
+  { value: '', label: 'All Statuses' },
+  { value: 'UPCOMING', label: 'Upcoming' },
+  { value: 'AVAILABLE', label: 'Available' },
+  { value: 'IN_PROGRESS', label: 'In Progress' },
+  { value: 'OVERDUE', label: 'Overdue' },
+  { value: 'COMPLETED', label: 'Completed' },
+];
 
-const PRIORITY_COLORS: Record<string, string> = {
-  CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#f59e0b', LOW: '#10b981'
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  UPCOMING: '#3b82f6', AVAILABLE: '#10b981', IN_PROGRESS: '#f59e0b',
-  COMPLETED: '#64748b', OVERDUE: '#ef4444', CANCELLED: '#374151'
-};
+const CATEGORY_FILTERS = [
+  { value: '', label: 'All Categories' },
+  { value: 'COLLEGE_ASSIGNMENT', label: 'Assignment' },
+  { value: 'EXAM', label: 'Exam' },
+  { value: 'STUDY_SESSION', label: 'Study' },
+  { value: 'PROJECT', label: 'Project' },
+  { value: 'HACKATHON', label: 'Hackathon' },
+  { value: 'EVENT', label: 'Event' },
+  { value: 'WORKSHOP', label: 'Workshop' },
+  { value: 'PERSONAL', label: 'Personal' },
+  { value: 'MEETING', label: 'Meeting' },
+  { value: 'REMINDER', label: 'Reminder' },
+];
 
 export function TasksScreen() {
+  const navigation = useNavigation<any>();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Filters
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+
+  // Modals
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
 
   const fetchTasks = useCallback(async () => {
     try {
-      const params = filter ? `?status=${filter}` : '';
-      const { data } = await api.get(`/tasks${params}&pageSize=50`);
-      setTasks(data.data);
-    } catch {}
-  }, [filter]);
+      const params = new URLSearchParams();
+      if (statusFilter) params.append('status', statusFilter);
+      if (categoryFilter) params.append('category', categoryFilter);
+      params.append('pageSize', '100');
+
+      const { data } = await api.get(`/tasks?${params.toString()}`);
+      setTasks(data.data || []);
+    } catch {
+      // Keep previous list on transient network error
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [statusFilter, categoryFilter]);
 
   useEffect(() => {
     setLoading(true);
-    fetchTasks().finally(() => setLoading(false));
+    fetchTasks();
   }, [fetchTasks]);
 
-  const onRefresh = useCallback(async () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    await fetchTasks();
-    setRefreshing(false);
+    fetchTasks();
   }, [fetchTasks]);
 
-  const completeTask = async (id: string) => {
+  const handleToggleComplete = async (task: Task) => {
+    const isCompleted = task.status === 'COMPLETED';
+    const nextStatus = isCompleted ? 'IN_PROGRESS' : 'COMPLETED';
+
+    // Optimistic UI update
+    setTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus as any } : t))
+    );
+
     try {
-      await api.put(`/tasks/${id}`, { status: 'COMPLETED' });
-      setTasks((prev) => prev.map((t) => t.id === id ? { ...t, status: 'COMPLETED' } : t));
+      await api.put(`/tasks/${task.id}`, { status: nextStatus });
     } catch {
-      Alert.alert('Error', 'Failed to complete task');
+      // Rollback
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, status: task.status } : t))
+      );
+      Alert.alert('Error', 'Failed to update task status');
     }
   };
 
-  const filters = ['UPCOMING', 'OVERDUE', 'IN_PROGRESS', 'COMPLETED'];
+  const handleDeleteTask = (task: Task) => {
+    Alert.alert(
+      'Delete Task',
+      `Are you sure you want to delete "${task.title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setTasks((prev) => prev.filter((t) => t.id !== task.id));
+            try {
+              await api.delete(`/tasks/${task.id}`);
+            } catch {
+              fetchTasks();
+              Alert.alert('Error', 'Failed to delete task');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Client-side search filter
+  const filteredTasks = useMemo(() => {
+    if (!search.trim()) return tasks;
+    const q = search.toLowerCase();
+    return tasks.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        t.description?.toLowerCase().includes(q) ||
+        t.tags?.some((tag) => tag.toLowerCase().includes(q))
+    );
+  }, [tasks, search]);
 
   const renderTask = ({ item: task }: { item: Task }) => {
-    const isOverdue = task.status === 'OVERDUE';
+    const isOverdue =
+      task.status === 'OVERDUE' ||
+      (task.status !== 'COMPLETED' && task.deadline && isPast(new Date(task.deadline)));
     const isCompleted = task.status === 'COMPLETED';
 
+    const priorityColor =
+      colors.priority[task.priority as keyof typeof colors.priority] || colors.primary;
+
+    const statusBadgeVariant = isCompleted
+      ? 'success'
+      : isOverdue
+      ? 'danger'
+      : task.status === 'IN_PROGRESS'
+      ? 'warning'
+      : 'info';
+
     return (
-      <View style={[styles.taskCard, isOverdue && styles.overdueCard]}>
-        <View style={[styles.priorityBar, { backgroundColor: PRIORITY_COLORS[task.priority] ?? '#6366f1' }]} />
-        <View style={styles.taskContent}>
-          <Text style={[styles.taskTitle, isCompleted && styles.completedText]} numberOfLines={2}>
-            {task.title}
-          </Text>
-          {task.description && (
-            <Text style={styles.taskDesc} numberOfLines={1}>{task.description}</Text>
-          )}
-          <View style={styles.taskMeta}>
-            <View style={[styles.statusBadge, { backgroundColor: (STATUS_COLORS[task.status] ?? '#6366f1') + '20' }]}>
-              <Text style={[styles.statusText, { color: STATUS_COLORS[task.status] ?? '#6366f1' }]}>
-                {task.status.replace('_', ' ')}
-              </Text>
-            </View>
-            {task.deadline && (
-              <Text style={[styles.deadline, isOverdue && { color: '#ef4444' }]}>
-                {isOverdue ? '⚠️ ' : '📅 '}
-                {format(new Date(task.deadline), 'MMM d, yyyy')}
-              </Text>
-            )}
-          </View>
-        </View>
-        {!isCompleted && (
+      <Card style={[styles.taskCard, isOverdue ? styles.overdueBorder : undefined]}>
+        <View style={styles.cardHeader}>
+          {/* Complete Toggle Checkbox */}
           <TouchableOpacity
-            style={styles.completeBtn}
-            onPress={() => completeTask(task.id)}
+            style={[styles.checkbox, isCompleted && styles.checkedCheckbox]}
+            onPress={() => handleToggleComplete(task)}
             activeOpacity={0.7}
           >
-            <Text style={styles.completeBtnText}>✓</Text>
+            {isCompleted && <Text style={styles.checkmark}>✓</Text>}
           </TouchableOpacity>
-        )}
-      </View>
+
+          <View style={styles.cardContent}>
+            {/* Title & Badges */}
+            <View style={styles.badgeRow}>
+              <View
+                style={[styles.priorityPill, { backgroundColor: priorityColor + '20', borderColor: priorityColor + '40' }]}
+              >
+                <View style={[styles.priorityDot, { backgroundColor: priorityColor }]} />
+                <Text style={[styles.priorityText, { color: priorityColor }]}>
+                  {task.priority}
+                </Text>
+              </View>
+
+              <Badge variant={statusBadgeVariant as any} size="sm">
+                {isCompleted ? 'Completed' : isOverdue ? 'Overdue' : task.status.replace('_', ' ')}
+              </Badge>
+
+              <Text style={styles.categoryText}>
+                {task.category.replace('_', ' ')}
+              </Text>
+            </View>
+
+            <Text
+              style={[styles.title, isCompleted && styles.completedTitle]}
+              numberOfLines={2}
+            >
+              {task.title}
+            </Text>
+
+            {task.description ? (
+              <Text style={styles.description} numberOfLines={2}>
+                {task.description}
+              </Text>
+            ) : null}
+
+            {/* Footer with deadline & actions */}
+            <View style={styles.cardFooter}>
+              {task.deadline ? (
+                <Text
+                  style={[
+                    styles.deadlineText,
+                    isOverdue && { color: colors.redLight, fontWeight: '700' },
+                  ]}
+                >
+                  {isOverdue ? '⚠️ ' : '📅 '}
+                  {format(new Date(task.deadline), 'MMM d, yyyy h:mm a')}
+                </Text>
+              ) : (
+                <Text style={styles.noDeadlineText}>No deadline set</Text>
+              )}
+
+              {/* Edit & Delete Actions */}
+              <View style={styles.actionButtons}>
+                <TouchableOpacity
+                  style={styles.actionBtn}
+                  onPress={() => setEditingTask(task)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.actionBtnText}>✏️</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.actionBtn}
+                  onPress={() => handleDeleteTask(task)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.actionBtnText}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Card>
     );
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Tasks</Text>
-        <Text style={styles.headerSub}>{tasks.length} tasks</Text>
-      </View>
-
-      {/* Filter tabs */}
-      <View style={styles.filterRow}>
-        <TouchableOpacity
-          style={[styles.filterChip, !filter && styles.filterActive]}
-          onPress={() => setFilter(null)}
-        >
-          <Text style={[styles.filterText, !filter && styles.filterTextActive]}>All</Text>
-        </TouchableOpacity>
-        {filters.map((f) => (
-          <TouchableOpacity
-            key={f}
-            style={[styles.filterChip, filter === f && styles.filterActive]}
-            onPress={() => setFilter(filter === f ? null : f)}
+      {/* Top Header */}
+      <AppHeader
+        title="My Tasks"
+        subtitle={`${filteredTasks.length} task${filteredTasks.length === 1 ? '' : 's'}`}
+        onOpenDrawer={() => setDrawerOpen(true)}
+        rightAction={
+          <Button
+            size="sm"
+            onPress={() => setShowCreateModal(true)}
+            style={{ minHeight: 38, paddingHorizontal: 12 }}
           >
-            <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
-              {f.replace('_', ' ')}
-            </Text>
-          </TouchableOpacity>
-        ))}
+            + New
+          </Button>
+        }
+      />
+
+      {/* Filter & Search Bar */}
+      <View style={styles.filterBar}>
+        <Input
+          placeholder="Search tasks..."
+          value={search}
+          onChangeText={setSearch}
+          containerStyle={{ marginBottom: 8 }}
+        />
+
+        <View style={styles.selectRow}>
+          <Select
+            value={statusFilter}
+            options={STATUS_FILTERS}
+            onChange={setStatusFilter}
+            containerStyle={{ flex: 1 }}
+            placeholder="Status: All"
+          />
+          <Select
+            value={categoryFilter}
+            options={CATEGORY_FILTERS}
+            onChange={setCategoryFilter}
+            containerStyle={{ flex: 1 }}
+            placeholder="Category: All"
+          />
+        </View>
       </View>
 
+      {/* Task List */}
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color="#7c3aed" />
+        <View style={styles.loaderBox}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loaderText}>Loading tasks...</Text>
+        </View>
+      ) : filteredTasks.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <EmptyState
+            title="No tasks found"
+            description={
+              search || statusFilter || categoryFilter
+                ? 'No tasks match the active filters. Try clearing filters.'
+                : 'Stay organized by adding your coursework, projects, and reminders.'
+            }
+            action={{
+              label: '+ Add New Task',
+              onClick: () => setShowCreateModal(true),
+            }}
+          />
         </View>
       ) : (
         <FlatList
-          data={tasks}
+          data={filteredTasks}
           keyExtractor={(item) => item.id}
           renderItem={renderTask}
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7c3aed" />}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>✅</Text>
-              <Text style={styles.emptyText}>No tasks here!</Text>
-            </View>
-          }
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.primary}
+            />
+          }
         />
       )}
+
+      {/* Create Task Modal */}
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        title="Create New Task"
+      >
+        <TaskForm
+          onSuccess={() => {
+            setShowCreateModal(false);
+            fetchTasks();
+          }}
+          onCancel={() => setShowCreateModal(false)}
+        />
+      </Modal>
+
+      {/* Edit Task Modal */}
+      <Modal
+        isOpen={Boolean(editingTask)}
+        onClose={() => setEditingTask(null)}
+        title="Edit Task"
+      >
+        {editingTask && (
+          <TaskForm
+            task={editingTask}
+            onSuccess={() => {
+              setEditingTask(null);
+              fetchTasks();
+            }}
+            onCancel={() => setEditingTask(null)}
+          />
+        )}
+      </Modal>
+
+      {/* Global Navigation Drawer */}
+      <AppDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        currentRoute="Tasks"
+        onNavigate={(route) => navigation.navigate(route)}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
-  headerTitle: { fontSize: 22, fontWeight: '700', color: '#f1f5f9' },
-  headerSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
-  filterRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-  filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#1e293b', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  filterActive: { backgroundColor: '#7c3aed20', borderColor: '#7c3aed50' },
-  filterText: { fontSize: 12, color: '#64748b', fontWeight: '500' },
-  filterTextActive: { color: '#a78bfa' },
-  list: { paddingHorizontal: 16, gap: 10, paddingBottom: 100 },
+  container: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
+  filterBar: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  selectRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  listContent: {
+    padding: 16,
+    gap: 12,
+    paddingBottom: 100,
+  },
   taskCard: {
-    backgroundColor: '#1e293b', borderRadius: 14, flexDirection: 'row',
-    overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    padding: 14,
   },
-  overdueCard: { borderColor: 'rgba(239,68,68,0.25)', backgroundColor: '#1f1515' },
-  priorityBar: { width: 4 },
-  taskContent: { flex: 1, padding: 14, gap: 6 },
-  taskTitle: { fontSize: 14, fontWeight: '600', color: '#e2e8f0', lineHeight: 20 },
-  completedText: { textDecorationLine: 'line-through', color: '#64748b' },
-  taskDesc: { fontSize: 12, color: '#64748b' },
-  taskMeta: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  statusText: { fontSize: 10, fontWeight: '600' },
-  deadline: { fontSize: 11, color: '#94a3b8', fontWeight: '500' },
-  completeBtn: {
-    padding: 14, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(16,185,129,0.1)',
+  overdueBorder: {
+    borderColor: 'rgba(239, 68, 68, 0.4)',
   },
-  completeBtnText: { fontSize: 16, color: '#10b981', fontWeight: '700' },
-  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyContainer: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyIcon: { fontSize: 48 },
-  emptyText: { fontSize: 16, color: '#475569' },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  checkedCheckbox: {
+    backgroundColor: colors.emerald,
+    borderColor: colors.emerald,
+  },
+  checkmark: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  cardContent: {
+    flex: 1,
+    gap: 4,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  priorityPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 9999,
+    borderWidth: 1,
+  },
+  priorityDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 9999,
+  },
+  priorityText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  categoryText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    lineHeight: 20,
+  },
+  completedTitle: {
+    textDecorationLine: 'line-through',
+    color: colors.textMuted,
+  },
+  description: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  deadlineText: {
+    fontSize: 11,
+    color: colors.amberLight,
+    fontWeight: '500',
+  },
+  noDeadlineText: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionBtn: {
+    padding: 4,
+  },
+  actionBtnText: {
+    fontSize: 14,
+  },
+  loaderBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loaderText: {
+    color: colors.textMuted,
+    fontSize: 13,
+  },
+  emptyBox: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
+  },
 });

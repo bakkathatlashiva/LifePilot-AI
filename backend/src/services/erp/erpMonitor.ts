@@ -256,21 +256,54 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
 
   logger.info(`[ERP Login] Attempting fast login for ${cleanUser}...`);
 
-  // Block heavy media assets to ensure fast page responsiveness
-  await page.route(/\.(png|jpg|jpeg|svg|woff|woff2|webp)(\?.*)?$/i, (route) => route.abort());
+  // Block heavy images to ensure fast responsiveness (do not block SVG/fonts needed for UI hydration)
+  await page.route(/\.(png|jpg|jpeg|webp|gif)(\?.*)?$/i, (route) => route.abort());
 
   if (!page.url().includes('login')) {
     await page.goto('https://admissions.aurora.edu.in/login', {
       waitUntil: 'domcontentloaded',
-      timeout: 15000,
+      timeout: 20000,
     });
   }
 
+  // Check if blocked by Cloudflare on initial page load
+  const initialTitle = await page.title().catch(() => '');
+  if (
+    initialTitle.toLowerCase().includes('just a moment') ||
+    initialTitle.toLowerCase().includes('attention required')
+  ) {
+    throw new Error(
+      'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+    );
+  }
+
   // Allow Next.js client hydration and CSRF initialization to complete
-  await page.waitForSelector('#credential', { timeout: 10000 });
+  try {
+    await page.waitForSelector('#credential', { timeout: 12000 });
+  } catch {
+    const isCloudflare = await page.evaluate(() => {
+      const text = document.body?.innerText || '';
+      return (
+        text.includes('Cloudflare') ||
+        text.includes('Just a moment') ||
+        text.includes('Verify you are human') ||
+        text.includes('Access denied')
+      );
+    }).catch(() => false);
+
+    if (isCloudflare) {
+      throw new Error(
+        'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+      );
+    }
+    throw new Error(
+      'Aurora login page did not load input fields in time. Please check your credentials or switch to the Session Cookies tab.'
+    );
+  }
+
   await Promise.race([
-    page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {}),
-    page.waitForTimeout(1000),
+    page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}),
+    page.waitForTimeout(800),
   ]);
 
   // Click, clear, and fill inputs with full React event dispatch
@@ -285,28 +318,47 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
   await page.dispatchEvent('#password', 'change');
   await page.waitForTimeout(300);
 
-  // Set up response listener directly for Aurora auth API (15s to allow for geolocation resolution)
+  // Set up response listener for any POST auth/login request
   const authResponsePromise = page.waitForResponse(
-    (res) => res.url().includes('/api/auth/login'),
+    (res) =>
+      res.request().method() === 'POST' &&
+      (res.url().includes('login') ||
+        res.url().includes('auth') ||
+        res.url().includes('session') ||
+        res.url().includes('credential') ||
+        res.url().includes('admissionsserver')),
+    { timeout: 15000 }
+  ).catch(() => null);
+
+  // Race URL navigation, dashboard selector, or auth response
+  const navPromise = page.waitForURL((url) => !url.href.includes('login'), { timeout: 15000 }).catch(() => null);
+  const selectorPromise = page.waitForSelector(
+    '.dashboard, .navbar, #content, [class*="assessment"], table',
     { timeout: 15000 }
   ).catch(() => null);
 
   await page.click('button[type="submit"]');
 
-  const authRes = await authResponsePromise;
+  const [authRes] = await Promise.all([
+    authResponsePromise,
+    Promise.race([navPromise, selectorPromise]),
+  ]);
+
   if (authRes) {
     const status = authRes.status();
-    logger.info(`[ERP Login] Auth API response status: ${status}`);
+    logger.info(`[ERP Login] Auth API response status: ${status} for ${cleanUser}`);
 
     if (status === 200) {
-      // Login successful! Brief pause to let cookies settle in context
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(400);
       return true;
     }
 
     if (status === 401 || status === 400) {
       const data = await authRes.json().catch(() => null);
-      const msg = data?.error || data?.message || 'Invalid ERP credentials. Please check your Student User ID and Password.';
+      const msg =
+        data?.error ||
+        data?.message ||
+        'Invalid ERP credentials. Please check your Student User ID and Password.';
       throw new Error(msg);
     }
 
@@ -321,8 +373,15 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
         throw new Error(`Aurora ERP: ${parsedData.error || parsedData.message}`);
       }
 
-      if (rawText.includes('Cloudflare') || rawText.includes('Attention Required') || rawText.includes('Access denied') || rawText.includes('cf-ray')) {
-        throw new Error('Aurora ERP security (Cloudflare WAF) blocked this cloud server IP. Please save your browser session or contact portal administrator.');
+      if (
+        rawText.includes('Cloudflare') ||
+        rawText.includes('Attention Required') ||
+        rawText.includes('Access denied') ||
+        rawText.includes('cf-ray')
+      ) {
+        throw new Error(
+          'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+        );
       }
 
       if (rawText.toLowerCase().includes('csrf')) {
@@ -333,11 +392,21 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
     }
   }
 
-  // Fallback if response wasn't intercepted: check page innerText for messages
-  await page.waitForTimeout(600);
+  // Check if navigation away from login has already succeeded
+  if (!page.url().includes('login')) {
+    logger.info(`[ERP Login] Navigated away from login URL: ${page.url()}`);
+    return true;
+  }
+
+  // Fallback: inspect page DOM for error messages
+  await page.waitForTimeout(800);
   const pageText = await page.evaluate(() => document.body.innerText || '').catch(() => '');
 
-  if (pageText.toLowerCase().includes('invalid credential') || pageText.toLowerCase().includes('wrong password') || pageText.toLowerCase().includes('incorrect')) {
+  if (
+    pageText.toLowerCase().includes('invalid credential') ||
+    pageText.toLowerCase().includes('wrong password') ||
+    pageText.toLowerCase().includes('incorrect')
+  ) {
     throw new Error('Invalid ERP credentials. Please check your Student User ID and Password.');
   }
 
@@ -345,17 +414,25 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
     throw new Error('Aurora University portal backend is temporarily unreachable. Please try again.');
   }
 
-  if (!page.url().includes('login')) {
-    return true;
+  if (
+    pageText.includes('Cloudflare') ||
+    pageText.includes('Just a moment') ||
+    pageText.includes('Verify you are human')
+  ) {
+    throw new Error(
+      'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+    );
   }
 
   const cookies = await page.context().cookies();
-  const hasAuthCookie = cookies.some((c) => c.name.includes('token') || c.name.includes('session') || c.name.includes('connect.sid'));
+  const hasAuthCookie = cookies.some(
+    (c) => c.name.includes('token') || c.name.includes('session') || c.name.includes('connect.sid')
+  );
   if (hasAuthCookie) {
     return true;
   }
 
-  throw new Error('Failed to authenticate with Aurora ERP. Please check your credentials or try again.');
+  throw new Error('Failed to authenticate with Aurora ERP. Please check your credentials or use Session Cookies.');
 }
 
 async function scrapeAssignments(
@@ -1048,11 +1125,18 @@ export async function authenticateAndSyncWithCredentials(
     // 1. Verify credentials via direct Aurora auth API in ~1.2s
     await performAuroraLogin(page, username, password);
 
-    // 2. Extract assignments immediately from the active session in ~700ms
+    // 2. Navigate to assessments module for extraction
+    logger.info(`[ERP] Navigating to assessments module for ${username}...`);
+    await page.goto('https://admissions.aurora.edu.in/modules/assessments/assessments', {
+      waitUntil: 'domcontentloaded',
+      timeout: 20000,
+    }).catch(() => {});
+
+    // 3. Extract assignments immediately from the active session in ~700ms
     logger.info(`[ERP] Extracting assignments immediately for ${username}...`);
     const rawAssignments = await extractAssignmentsFromPage(page);
 
-    // 3. Capture authenticated session cookies
+    // 4. Capture authenticated session cookies
     const cookies = await context.cookies();
     const connectionId = await saveERPSession(userId, erpUrl, cookies, { username, password });
 
@@ -1135,7 +1219,14 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
   }
 
   if (typeof input === 'string') {
-    const trimmed = input.trim();
+    let trimmed = input.trim();
+    // Strip wrapping quotes if user pasted '"connect.sid=..."'
+    if (
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+      trimmed = trimmed.slice(1, -1).trim();
+    }
 
     // 2. JSON array or JSON object string
     if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
@@ -1161,7 +1252,8 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
     }
 
     // 3. Standard document.cookie string: "name1=val1; name2=val2; ..."
-    const pairs = trimmed.split(';');
+    // Also handles newlines gracefully
+    const pairs = trimmed.replace(/\r?\n/g, ';').split(';');
     const results: Array<{ name: string; value: string; domain: string; path: string }> = [];
     for (const pair of pairs) {
       const idx = pair.indexOf('=');
@@ -1181,9 +1273,9 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
 
 /**
  * Authenticate directly via session cookies.
- * 1. Verifies the cookies live against Aurora student-portal assessment API.
+ * 1. Verifies the cookies live against Aurora student-portal assessment API or browser context.
  * 2. Saves the verified cookies encrypted to DB.
- * 3. Immediately returns parsed assignments in ~300ms without Playwright.
+ * 3. Immediately returns parsed assignments for instant UI display.
  */
 export async function authenticateAndSyncWithCookies(
   userId: string,
@@ -1197,12 +1289,54 @@ export async function authenticateAndSyncWithCookies(
 
   logger.info(`[ERP] Authenticating user ${userId} with ${cookies.length} session cookies...`);
 
-  // Direct fast-path check against Aurora student-portal assessments API
-  const rawAssignments = await fetchAssessmentsDirectApi(cookies);
+  // 1. Direct fast-path check against Aurora student-portal assessments API
+  let rawAssignments = await fetchAssessmentsDirectApi(cookies);
+
+  // 2. Browser fallback check if direct HTTP fetch failed
   if (!rawAssignments) {
-    throw new Error(
-      'Session cookies were rejected by Aurora portal (expired or missing connect.sid). Please log in to admissions.aurora.edu.in and copy fresh cookies.'
-    );
+    logger.info('[ERP] Direct API check returned null. Verifying cookies via browser session...');
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-web-security',
+      ],
+    });
+
+    try {
+      const context = await browser.newContext(getBrowserContextOptions());
+      await context.addCookies(
+        cookies.map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain.startsWith('.') ? c.domain : `.${c.domain}`,
+          path: c.path || '/',
+        }))
+      );
+      const page = await context.newPage();
+      await page.goto('https://admissions.aurora.edu.in/modules/assessments/assessments', {
+        waitUntil: 'domcontentloaded',
+        timeout: 20000,
+      });
+
+      const isStillLogin = page.url().includes('login');
+      if (isStillLogin) {
+        throw new Error(
+          'Session cookies were rejected by Aurora portal (expired or missing connect.sid). Please log in to admissions.aurora.edu.in and copy fresh cookies.'
+        );
+      }
+
+      rawAssignments = await extractAssignmentsFromPage(page);
+    } finally {
+      await browser.close().catch(() => {});
+    }
+  }
+
+  if (!rawAssignments) {
+    rawAssignments = [];
   }
 
   const connectionId = await saveERPSession(userId, erpUrl, cookies);

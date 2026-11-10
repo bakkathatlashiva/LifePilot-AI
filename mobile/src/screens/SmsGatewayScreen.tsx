@@ -1,19 +1,35 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, Switch, RefreshControl, ActivityIndicator, Alert, StatusBar
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Switch,
+  RefreshControl,
+  ActivityIndicator,
+  Alert,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { format } from 'date-fns';
 import { smsGatewayEngine, GatewayState } from '../services/smsGatewayService';
 import api from '../lib/api';
-import { format } from 'date-fns';
+import { colors } from '../theme/colors';
+import { AppHeader } from '../components/ui/AppHeader';
+import { AppDrawer } from '../components/navigation/AppDrawer';
+import { Card } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
 
 interface SmsJob {
   id: string;
   recipientPhone: string;
   message: string;
   status: 'PENDING' | 'PROCESSING' | 'SENT' | 'FAILED' | 'RETRYING' | 'CANCELLED';
-  retries: number;
+  retries?: number;
   scheduledAt: string;
   sentAt?: string | null;
   error?: string | null;
@@ -21,6 +37,9 @@ interface SmsJob {
 }
 
 export function SmsGatewayScreen() {
+  const navigation = useNavigation<any>();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const [gatewayState, setGatewayState] = useState<GatewayState>(smsGatewayEngine.getState());
   const [isToggling, setIsToggling] = useState(false);
   const [recentJobs, setRecentJobs] = useState<SmsJob[]>([]);
@@ -32,7 +51,7 @@ export function SmsGatewayScreen() {
   const [message, setMessage] = useState('');
   const [sendingInstant, setSendingInstant] = useState(false);
 
-  // Subscribe to live gateway telemetry
+  // Telemetry listener
   useEffect(() => {
     const unsubscribe = smsGatewayEngine.subscribe((state: GatewayState) => {
       setGatewayState(state);
@@ -47,9 +66,8 @@ export function SmsGatewayScreen() {
       if (res.data?.data) {
         setRecentJobs(res.data.data);
       }
-    } catch (err: any) {
-      console.warn('Failed to load SMS jobs:', err?.message);
-    } finally {
+    } catch {}
+    finally {
       setLoadingJobs(false);
     }
   }, []);
@@ -100,27 +118,24 @@ export function SmsGatewayScreen() {
 
     setSendingInstant(true);
     try {
-      // Create job in backend so history is preserved
-      const res = await api.post('/sms/jobs', {
+      await api.post('/sms/jobs', {
         recipientPhone: cleanPhone,
         message: cleanMsg,
       });
 
-      const createdJob = res.data?.data;
       if (gatewayState.isActive) {
-        // If gateway is running on this device, dispatch immediately via SIM
         const result = await smsGatewayEngine.sendImmediateSms(cleanPhone, cleanMsg);
         if (result.success) {
-          Alert.alert('Success', `SMS sent successfully to ${cleanPhone} via your SIM card!`);
+          Alert.alert('Success', `SMS dispatched immediately to ${cleanPhone} via your SIM card!`);
           setRecipient('');
           setMessage('');
         } else {
-          Alert.alert('SMS Failed', result.error || 'Failed to send via SIM.');
+          Alert.alert('SMS Error', result.error || 'Failed to send via SIM.');
         }
       } else {
         Alert.alert(
           'Job Queued',
-          'SMS job queued in backend. Turn ON the SIM Gateway toggle to dispatch pending SMS jobs.'
+          'SMS job queued in backend. Turn ON the SIM Gateway switch above to dispatch pending SMS jobs.'
         );
         setRecipient('');
         setMessage('');
@@ -134,66 +149,57 @@ export function SmsGatewayScreen() {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'SENT': return '#10b981';
-      case 'PROCESSING': return '#3b82f4';
-      case 'RETRYING': return '#f59e0b';
-      case 'FAILED': return '#ef4444';
-      case 'CANCELLED': return '#64748b';
-      default: return '#8b5cf6';
-    }
-  };
-
   const charCount = message.length;
   const smsSegments = Math.ceil(Math.max(charCount, 1) / 160);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+
+      {/* Header */}
+      <AppHeader
+        title="SIM SMS Gateway"
+        subtitle="Direct Physical SIM Card Dispatch Engine"
+        onOpenDrawer={() => setDrawerOpen(true)}
+      />
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7c3aed" />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>SIM SMS Gateway</Text>
-            <Text style={styles.subtitle}>Direct native SIM card dispatch engine</Text>
-          </View>
-          <View style={[styles.statusPill, gatewayState.isActive ? styles.pillOnline : styles.pillOffline]}>
-            <View style={[styles.dot, gatewayState.isActive ? styles.dotOnline : styles.dotOffline]} />
-            <Text style={styles.pillText}>{gatewayState.isActive ? 'ONLINE' : 'OFFLINE'}</Text>
-          </View>
-        </View>
-
         {/* Master Control Card */}
-        <View style={styles.card}>
+        <Card style={styles.masterCard}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardIconBox}>
-              <Text style={styles.cardIcon}>📶</Text>
+              <Text style={{ fontSize: 18 }}>📶</Text>
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={styles.cardTitle}>Gateway Master Switch</Text>
               <Text style={styles.cardSubtitle}>
                 {gatewayState.isActive
-                  ? 'Listening for scheduled reminders & SMS alerts'
+                  ? 'Active · Listening for scheduled reminders & SMS alerts'
                   : 'Gateway paused. Enable to process SMS queue'}
               </Text>
             </View>
             {isToggling ? (
-              <ActivityIndicator color="#7c3aed" size="small" />
+              <ActivityIndicator color={colors.primary} size="small" />
             ) : (
               <Switch
                 value={gatewayState.isActive}
                 onValueChange={handleToggleGateway}
-                thumbColor={gatewayState.isActive ? '#ffffff' : '#94a3b8'}
-                trackColor={{ false: '#334155', true: '#7c3aed' }}
+                thumbColor="#ffffff"
+                trackColor={{ false: colors.input, true: colors.primary }}
               />
             )}
           </View>
 
-          {/* Device & SIM Diagnostics */}
+          {/* Diagnostics Grid */}
           <View style={styles.divider} />
           <View style={styles.infoGrid}>
             <View style={styles.infoCol}>
@@ -212,7 +218,7 @@ export function SmsGatewayScreen() {
             </View>
             <View style={styles.infoCol}>
               <Text style={styles.infoLabel}>Processed</Text>
-              <Text style={[styles.infoVal, { color: '#10b981' }]}>
+              <Text style={[styles.infoVal, { color: colors.emeraldLight }]}>
                 {gatewayState.jobsProcessed} sent
               </Text>
             </View>
@@ -225,59 +231,50 @@ export function SmsGatewayScreen() {
               {gatewayState.currentActivity}
             </Text>
           </View>
-        </View>
+        </Card>
 
         {/* Send Instant SMS Composer */}
-        <View style={styles.card}>
+        <Card style={styles.composerCard}>
           <Text style={styles.sectionTitle}>💬 Send SMS via Phone SIM</Text>
           <Text style={styles.sectionSubtitle}>
             Dispatches directly through your phone's carrier — 100% free with unlimited SMS packs.
           </Text>
 
-          <Text style={styles.inputLabel}>Recipient Phone Number</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="+919876543210 or 10-digit number"
-            placeholderTextColor="#64748b"
+          <Input
+            label="Recipient Phone Number"
+            placeholder="+919550802806 or 10-digit number"
             keyboardType="phone-pad"
             value={recipient}
             onChangeText={setRecipient}
           />
 
-          <View style={styles.msgHeaderRow}>
-            <Text style={styles.inputLabel}>Message Content</Text>
-            <Text style={styles.charCounter}>
-              {charCount} chars ({smsSegments} SMS {smsSegments > 1 ? 'parts' : 'part'})
-            </Text>
-          </View>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Type your alert, assignment reminder, or notice..."
-            placeholderTextColor="#64748b"
-            multiline
-            numberOfLines={4}
-            value={message}
-            onChangeText={setMessage}
-          />
-
-          <TouchableOpacity
-            style={[styles.sendBtn, sendingInstant && styles.btnDisabled]}
-            onPress={handleSendInstant}
-            disabled={sendingInstant}
-            activeOpacity={0.8}
-          >
-            {sendingInstant ? (
-              <ActivityIndicator color="#ffffff" size="small" />
-            ) : (
-              <Text style={styles.sendBtnText}>
-                {gatewayState.isActive ? '🚀 Send Directly via SIM' : '📤 Queue in Gateway'}
+          <View style={{ gap: 6 }}>
+            <View style={styles.msgHeaderRow}>
+              <Text style={styles.inputLabel}>Message Content</Text>
+              <Text style={styles.charCounter}>
+                {charCount} chars ({smsSegments} SMS {smsSegments > 1 ? 'parts' : 'part'})
               </Text>
-            )}
-          </TouchableOpacity>
-        </View>
+            </View>
+            <Input
+              placeholder="Type your alert, assignment reminder, or notice..."
+              multiline
+              numberOfLines={3}
+              value={message}
+              onChangeText={setMessage}
+              style={{ minHeight: 70, textAlignVertical: 'top' }}
+            />
+          </View>
+
+          <Button
+            onPress={handleSendInstant}
+            loading={sendingInstant}
+          >
+            {gatewayState.isActive ? '🚀 Send Directly via SIM' : '📤 Queue in Gateway'}
+          </Button>
+        </Card>
 
         {/* Queue & History */}
-        <View style={styles.card}>
+        <Card style={styles.historyCard}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>📋 SMS Dispatch History</Text>
             <TouchableOpacity onPress={fetchJobs}>
@@ -286,142 +283,103 @@ export function SmsGatewayScreen() {
           </View>
 
           {loadingJobs && recentJobs.length === 0 ? (
-            <ActivityIndicator color="#7c3aed" style={{ marginVertical: 20 }} />
+            <ActivityIndicator color={colors.primary} style={{ marginVertical: 20 }} />
           ) : recentJobs.length === 0 ? (
             <Text style={styles.emptyText}>No SMS jobs dispatched yet.</Text>
           ) : (
             <View style={styles.jobList}>
-              {recentJobs.map((job) => (
-                <View key={job.id} style={styles.jobItem}>
-                  <View style={styles.jobTopRow}>
-                    <Text style={styles.jobPhone}>📱 {job.recipientPhone}</Text>
-                    <View style={[styles.jobBadge, { backgroundColor: `${getStatusColor(job.status)}20` }]}>
-                      <Text style={[styles.jobBadgeText, { color: getStatusColor(job.status) }]}>
+              {recentJobs.map((job) => {
+                const badgeVariant =
+                  job.status === 'SENT'
+                    ? 'success'
+                    : job.status === 'PROCESSING'
+                    ? 'info'
+                    : job.status === 'FAILED'
+                    ? 'danger'
+                    : 'warning';
+
+                return (
+                  <View key={job.id} style={styles.jobItem}>
+                    <View style={styles.jobTopRow}>
+                      <Text style={styles.jobPhone}>📱 {job.recipientPhone}</Text>
+                      <Badge variant={badgeVariant as any} size="sm">
                         {job.status}
-                      </Text>
+                      </Badge>
                     </View>
-                  </View>
-                  <Text style={styles.jobMsg} numberOfLines={2}>{job.message}</Text>
-                  <View style={styles.jobBottomRow}>
-                    <Text style={styles.jobDate}>
-                      {job.sentAt
-                        ? `Sent: ${format(new Date(job.sentAt), 'MMM dd, HH:mm')}`
-                        : `Scheduled: ${format(new Date(job.scheduledAt), 'MMM dd, HH:mm')}`}
+                    <Text style={styles.jobMsg} numberOfLines={2}>{job.message}</Text>
+                    <Text style={styles.jobTime}>
+                      {format(new Date(job.scheduledAt), 'MMM d, h:mm a')}
                     </Text>
-                    {job.error ? (
-                      <Text style={styles.jobError} numberOfLines={1}>⚠️ {job.error}</Text>
-                    ) : null}
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           )}
-        </View>
+        </Card>
       </ScrollView>
+
+      {/* Global Navigation Drawer */}
+      <AppDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        currentRoute="SMSGateway"
+        onNavigate={(route) => navigation.navigate(route)}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  scrollContent: { padding: 16, gap: 16 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  title: { fontSize: 24, fontWeight: '800', color: '#ffffff' },
-  subtitle: { fontSize: 13, color: '#64748b', marginTop: 2 },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
-  },
-  pillOnline: { backgroundColor: '#10b98120', borderColor: '#10b98150', borderWidth: 1 },
-  pillOffline: { backgroundColor: '#64748b20', borderColor: '#64748b50', borderWidth: 1 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  dotOnline: { backgroundColor: '#10b981' },
-  dotOffline: { backgroundColor: '#94a3b8' },
-  pillText: { fontSize: 12, fontWeight: '700', color: '#ffffff' },
-  card: {
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: colors.bg },
+  scrollContent: { padding: 16, gap: 14, paddingBottom: 100 },
+  masterCard: { padding: 16, gap: 12 },
+  cardHeaderRow: { flexDirection: 'row', alignItems: 'center' },
   cardIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#7c3aed20',
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: colors.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardIcon: { fontSize: 22 },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  cardSubtitle: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
-  divider: { height: 1, backgroundColor: '#334155', marginVertical: 14 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+  cardSubtitle: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  divider: { height: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', marginVertical: 4 },
   infoGrid: { flexDirection: 'row', justifyContent: 'space-between' },
-  infoCol: { alignItems: 'flex-start', flex: 1 },
-  infoLabel: { fontSize: 11, color: '#64748b', textTransform: 'uppercase', fontWeight: '600' },
-  infoVal: { fontSize: 13, color: '#f1f5f9', fontWeight: '600', marginTop: 3 },
+  infoCol: { flex: 1, alignItems: 'center', gap: 2 },
+  infoLabel: { fontSize: 10, color: colors.textMuted, fontWeight: '600', textTransform: 'uppercase' },
+  infoVal: { fontSize: 12, color: colors.text, fontWeight: '600' },
   activityBox: {
-    marginTop: 14,
-    backgroundColor: '#0f172a80',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    backgroundColor: colors.input,
+    padding: 8,
+    borderRadius: 8,
   },
-  activityLabel: { fontSize: 11, color: '#7c3aed', fontWeight: '700' },
-  activityText: { fontSize: 12, color: '#cbd5e1', flex: 1 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
-  sectionSubtitle: { fontSize: 12, color: '#94a3b8', marginTop: 2, marginBottom: 14 },
-  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  refreshLink: { fontSize: 13, color: '#7c3aed', fontWeight: '600' },
-  inputLabel: { fontSize: 12, fontWeight: '600', color: '#cbd5e1', marginBottom: 6 },
-  msgHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, marginBottom: 6 },
-  charCounter: { fontSize: 11, color: '#64748b' },
-  input: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-    color: '#ffffff',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-  },
-  textArea: { height: 90, textAlignVertical: 'top' },
-  sendBtn: {
-    backgroundColor: '#7c3aed',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 14,
-  },
-  btnDisabled: { opacity: 0.6 },
-  sendBtnText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
-  emptyText: { color: '#64748b', fontSize: 13, textAlign: 'center', marginVertical: 16 },
+  activityLabel: { fontSize: 10, color: colors.textMuted, fontWeight: '700' },
+  activityText: { fontSize: 11, color: colors.primaryLight, flex: 1 },
+  composerCard: { padding: 16, gap: 12 },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
+  sectionSubtitle: { fontSize: 11, color: colors.textMuted, lineHeight: 16 },
+  msgHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  inputLabel: { fontSize: 13, fontWeight: '500', color: colors.textSecondary },
+  charCounter: { fontSize: 10, color: colors.textMuted },
+  historyCard: { padding: 16, gap: 12 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  refreshLink: { fontSize: 12, color: colors.primaryLight, fontWeight: '600' },
+  emptyText: { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginVertical: 14 },
   jobList: { gap: 10 },
-  jobItem: { backgroundColor: '#0f172a', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#334155' },
-  jobTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  jobPhone: { fontSize: 13, fontWeight: '700', color: '#f1f5f9' },
-  jobBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  jobBadgeText: { fontSize: 10, fontWeight: '800' },
-  jobMsg: { fontSize: 12, color: '#94a3b8', lineHeight: 17 },
-  jobBottomRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  jobDate: { fontSize: 11, color: '#64748b' },
-  jobError: { fontSize: 11, color: '#ef4444', flex: 1, textAlign: 'right', marginLeft: 8 },
+  jobItem: {
+    backgroundColor: colors.input,
+    borderRadius: 10,
+    padding: 10,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  jobTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  jobPhone: { fontSize: 12, fontWeight: '700', color: colors.text },
+  jobMsg: { fontSize: 11, color: colors.textSecondary, lineHeight: 15 },
+  jobTime: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
 });
