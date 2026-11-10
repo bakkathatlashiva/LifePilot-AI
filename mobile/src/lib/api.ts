@@ -17,7 +17,7 @@ export const getHostIp = (): string => {
 export const normalizeApiUrl = (url?: string): string => {
   const hostIp = getHostIp();
   // Default to deployed production backend on Render
-  const defaultUrl = 'https://lifepilot-ai-backend-uwp4.onrender.com/api';
+  const defaultUrl = 'https://lifepilot-ai-backend-o3j4.onrender.com/api';
   let clean = url?.trim() || defaultUrl;
 
   // On physical Android/iOS devices, replace localhost / 127.0.0.1 with host computer IP

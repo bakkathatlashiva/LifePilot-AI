@@ -13,7 +13,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://lifepilot-ai-backend-uwp4.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://lifepilot-ai-backend-o3j4.onrender.com"
       }
     },
     "production": {
@@ -21,7 +21,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://lifepilot-ai-backend-uwp4.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://lifepilot-ai-backend-o3j4.onrender.com"
       }
     }
   },
