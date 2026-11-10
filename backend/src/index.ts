@@ -4,7 +4,8 @@ if (process.platform !== 'win32' && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
   process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
 }
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import fs from 'fs';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -98,21 +99,7 @@ app.get('/google9da971b5644f9a64.html', (req: Request, res: Response) => {
   res.type('text/html').send('google-site-verification: google9da971b5644f9a64.html');
 });
 
-// ─── Health Check & Root ────────────────────
-app.get('/', (req, res) => {
-  const acceptHeader = req.headers.accept || '';
-  if (acceptHeader.includes('text/html')) {
-    return res.redirect(env.FRONTEND_URL);
-  }
-  return res.json({
-    name: 'LifePilot AI API Server',
-    status: 'running',
-    version: '1.0.0',
-    frontend: env.FRONTEND_URL,
-    health: '/health',
-  });
-});
-
+// ─── Health Check ───────────────────────────
 app.get(['/health', '/api/health'], (req: Request, res: Response) => {
   res.status(200).json({
     status: 'ok',
@@ -135,6 +122,37 @@ app.use('/api/telegram', telegramRoutes);
 app.use('/api/preferences', preferenceRoutes);
 app.use('/api/settings/preferences', preferenceRoutes);
 app.use('/api/sms', smsRoutes);
+
+// ─── Single-Port Web Frontend Serving ───────
+// When web is built, backend serves the full web app and API on a single port (3001)
+const webDistPath = path.resolve(__dirname, '../../web/dist');
+const hasWebDist = fs.existsSync(webDistPath) && fs.existsSync(path.join(webDistPath, 'index.html'));
+
+if (hasWebDist) {
+  logger.info(`📦 Single-Port Mode: Serving Web Frontend from ${webDistPath}`);
+  app.use(express.static(webDistPath));
+  app.get('*', (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api') || req.path.includes('.')) {
+      return next();
+    }
+    res.sendFile(path.join(webDistPath, 'index.html'));
+  });
+} else {
+  // If no web build found, root route redirects to Vite dev server
+  app.get('/', (req, res) => {
+    const acceptHeader = req.headers.accept || '';
+    if (acceptHeader.includes('text/html')) {
+      return res.redirect(env.FRONTEND_URL);
+    }
+    return res.json({
+      name: 'LifePilot AI API Server',
+      status: 'running',
+      version: '1.0.0',
+      frontend: env.FRONTEND_URL,
+      health: '/health',
+    });
+  });
+}
 
 // ─── Error handling ───────────────────────
 app.use(notFound);
