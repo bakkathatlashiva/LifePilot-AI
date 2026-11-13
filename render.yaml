@@ -44,7 +44,9 @@ services:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: AURORA_ERP_URL
-        value: https://admissions.aurora.edu.in/modules/assessments/assessments
+        value: https://www.sidus.net/modules/assessments/assessments
+      - key: ERP_URL
+        value: https://www.sidus.net/modules/assessments/assessments
       - key: AURORA_ERP_USER
         sync: false
       - key: AURORA_ERP_PASSWORD

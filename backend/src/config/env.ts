@@ -59,8 +59,9 @@ export const env = {
   // Encryption
   ENCRYPTION_KEY: requireEnv('ENCRYPTION_KEY'), // 32-char hex string
 
-  // Aurora ERP
-  AURORA_ERP_URL: optional('AURORA_ERP_URL', 'https://admissions.aurora.edu.in/modules/assessments/assessments'),
+  // ERP Integration (Sidus Portal)
+  AURORA_ERP_URL: optional('AURORA_ERP_URL', optional('ERP_URL', 'https://www.sidus.net/modules/assessments/assessments')),
+  ERP_URL: optional('ERP_URL', optional('AURORA_ERP_URL', 'https://www.sidus.net/modules/assessments/assessments')),
   AURORA_ERP_USER: optional('AURORA_ERP_USER', ''),
   AURORA_ERP_PASSWORD: optional('AURORA_ERP_PASSWORD', ''),
   // Telegram integration (optional)

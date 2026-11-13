@@ -27,10 +27,10 @@ async function main() {
 
   console.log('⏳ Waiting for you to finish logging in...');
 
-  // Wait until user is redirected back to Aurora ERP and not on Google login
+  // Wait until user is redirected back to Sidus ERP and not on Google login
   await page.waitForURL((url) => {
     const u = url.toString();
-    return u.includes('admissions.aurora.edu.in') && !u.includes('accounts.google.com') && !u.includes('login');
+    return (u.includes('sidus.net') || u.includes('admissions.aurora.edu.in')) && !u.includes('accounts.google.com') && !u.includes('login');
   }, { timeout: 180000 }); // 3 minutes timeout
 
   // Wait a few seconds for all session cookies to settle

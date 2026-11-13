@@ -8,7 +8,7 @@
  * 3. The session cookies are stored encrypted in the DB and reused.
  *
  * IMPORTANT LIMITATION NOTE:
- * Aurora ERP (admissions.aurora.edu.in) uses Google OAuth login.
+ * Sidus ERP (www.sidus.net) uses student credentials or session cookies.
  * Automated access depends entirely on whether:
  *   a) The portal exposes a machine-readable API, OR
  *   b) The portal allows persistent session cookies after a one-time user login.
@@ -64,6 +64,17 @@ export async function runERPSync(
   if (!connection || !connection.isActive) {
     inFlightSyncs.delete(erpConnectionId);
     return;
+  }
+
+  // Auto-migrate legacy aurora URL to new sidus URL
+  if (connection.erpUrl.includes('admissions.aurora.edu.in')) {
+    try {
+      await prisma.eRPConnection.update({
+        where: { id: erpConnectionId },
+        data: { erpUrl: 'https://www.sidus.net/modules/assessments/assessments' },
+      });
+      connection.erpUrl = 'https://www.sidus.net/modules/assessments/assessments';
+    } catch {}
   }
 
   // Immediately broadcast RUNNING status
@@ -246,21 +257,26 @@ function getBrowserContextOptions() {
 }
 
 /**
- * Helper to perform robust and fast Aurora ERP login.
- * Listens directly to Aurora's auth API for immediate verification.
+ * Helper to perform robust and fast Aurora / Sidus ERP login.
+ * Listens directly to portal auth API for immediate verification.
  */
-async function performAuroraLogin(page: Page, user: string, pass: string): Promise<boolean> {
+async function performAuroraLogin(
+  page: Page,
+  user: string,
+  pass: string,
+  targetLoginUrl: string = 'https://www.sidus.net/login'
+): Promise<boolean> {
   const trimmedUser = user.trim();
   const cleanUser = trimmedUser.includes('@') ? trimmedUser : trimmedUser.toUpperCase();
   const cleanPass = pass.trim();
 
-  logger.info(`[ERP Login] Attempting fast login for ${cleanUser}...`);
+  logger.info(`[ERP Login] Attempting fast login for ${cleanUser} at ${targetLoginUrl}...`);
 
   // Block heavy images to ensure fast responsiveness (do not block SVG/fonts needed for UI hydration)
   await page.route(/\.(png|jpg|jpeg|webp|gif)(\?.*)?$/i, (route) => route.abort());
 
   if (!page.url().includes('login')) {
-    await page.goto('https://admissions.aurora.edu.in/login', {
+    await page.goto(targetLoginUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 20000,
     });
@@ -273,7 +289,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
     initialTitle.toLowerCase().includes('attention required')
   ) {
     throw new Error(
-      'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+      'Sidus ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
     );
   }
 
@@ -293,11 +309,11 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
 
     if (isCloudflare) {
       throw new Error(
-        'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+        'Sidus ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
       );
     }
     throw new Error(
-      'Aurora login page did not load input fields in time. Please check your credentials or switch to the Session Cookies tab.'
+      'Sidus login page did not load input fields in time. Please check your credentials or switch to the Session Cookies tab.'
     );
   }
 
@@ -326,6 +342,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
         res.url().includes('auth') ||
         res.url().includes('session') ||
         res.url().includes('credential') ||
+        res.url().includes('sidus') ||
         res.url().includes('admissionsserver')),
     { timeout: 15000 }
   ).catch(() => null);
@@ -370,7 +387,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
       try { parsedData = JSON.parse(rawText); } catch {}
 
       if (parsedData?.error || parsedData?.message) {
-        throw new Error(`Aurora ERP: ${parsedData.error || parsedData.message}`);
+        throw new Error(`Sidus ERP: ${parsedData.error || parsedData.message}`);
       }
 
       if (
@@ -380,15 +397,15 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
         rawText.includes('cf-ray')
       ) {
         throw new Error(
-          'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+          'Sidus ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
         );
       }
 
       if (rawText.toLowerCase().includes('csrf')) {
-        throw new Error('Aurora ERP security token (CSRF) validation failed. Please try logging in again.');
+        throw new Error('Sidus ERP security token (CSRF) validation failed. Please try logging in again.');
       }
 
-      throw new Error('Aurora ERP authentication was rejected (HTTP 403 Forbidden).');
+      throw new Error('Sidus ERP authentication was rejected (HTTP 403 Forbidden).');
     }
   }
 
@@ -411,7 +428,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
   }
 
   if (pageText.includes('Unable to connect to the backend')) {
-    throw new Error('Aurora University portal backend is temporarily unreachable. Please try again.');
+    throw new Error('Sidus University portal backend is temporarily unreachable. Please try again.');
   }
 
   if (
@@ -420,7 +437,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
     pageText.includes('Verify you are human')
   ) {
     throw new Error(
-      'Aurora ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
+      'Sidus ERP Cloudflare security verification blocked the cloud server IP. Please switch to the "Session Cookies" tab to connect in 1 second!'
     );
   }
 
@@ -432,7 +449,7 @@ async function performAuroraLogin(page: Page, user: string, pass: string): Promi
     return true;
   }
 
-  throw new Error('Failed to authenticate with Aurora ERP. Please check your credentials or use Session Cookies.');
+  throw new Error('Failed to authenticate with Sidus ERP. Please check your credentials or use Session Cookies.');
 }
 
 async function scrapeAssignments(
@@ -593,36 +610,41 @@ async function fetchAssessmentsDirectApi(cookies: any[]): Promise<ERPAssignmentD
     ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch('https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments', {
-      method: 'GET',
-      headers: {
-        'Cookie': cookieString,
-        'User-Agent': userAgent,
-        'Accept': 'application/json, text/plain, */*',
-        'Origin': 'https://admissions.aurora.edu.in',
-        'Referer': 'https://admissions.aurora.edu.in/',
-        'Accept-Language': 'en-IN,en-GB,en;q=0.9,en-US;q=0.8',
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!res.ok) {
-      logger.info(`[ERP Direct API] Response status ${res.status}. Falling back to browser.`);
-      return null;
-    }
-    const json: any = await res.json();
-    if (json?.data && Array.isArray(json.data) && json.data.length > 0) {
-      logger.info(`[ERP Direct API] ⚡ Fast-path retrieved ${json.data.length} assessment items in < 500ms!`);
-      return parseApiAssessmentItems(json.data);
-    }
-    return null;
-  } catch (err: any) {
-    logger.info(`[ERP Direct API] Fast-path skipped (${err.message || 'error'}). Falling back to browser.`);
-    return null;
+  const endpoints = [
+    'https://www.sidus.net/api/v1/student-portal/me/assessments',
+    'https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments',
+  ];
+
+  for (const apiUrl of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6000);
+      const hostOrigin = apiUrl.includes('sidus.net') ? 'https://www.sidus.net' : 'https://admissions.aurora.edu.in';
+      const res = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Cookie': cookieString,
+          'User-Agent': userAgent,
+          'Accept': 'application/json, text/plain, */*',
+          'Origin': hostOrigin,
+          'Referer': `${hostOrigin}/`,
+          'Accept-Language': 'en-IN,en-GB,en;q=0.9,en-US;q=0.8',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const json: any = await res.json().catch(() => null);
+        if (json?.data && Array.isArray(json.data) && json.data.length > 0) {
+          logger.info(`[ERP Direct API] ⚡ Fast-path retrieved ${json.data.length} assessment items in < 500ms from ${apiUrl}!`);
+          return parseApiAssessmentItems(json.data);
+        }
+      }
+    } catch {}
   }
+
+  logger.info('[ERP Direct API] Direct fast-path skipped. Falling back to browser.');
+  return null;
 }
 
 async function extractAssignmentsFromPage(
@@ -633,11 +655,24 @@ async function extractAssignmentsFromPage(
     logger.info('[ERP] Attempting direct student-portal API extraction...');
     const apiRes: any = await page.evaluate(async () => {
       try {
-        const res = await fetch('https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments', {
-          credentials: 'include'
-        });
-        if (!res.ok) return null;
-        return await res.json();
+        const candidateEndpoints = [
+          '/api/v1/student-portal/me/assessments',
+          `${window.location.origin}/api/v1/student-portal/me/assessments`,
+          'https://www.sidus.net/api/v1/student-portal/me/assessments',
+          'https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments',
+        ];
+        for (const ep of candidateEndpoints) {
+          try {
+            const res = await fetch(ep, { credentials: 'include' });
+            if (res.ok) {
+              const data = await res.json();
+              if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
+                return data;
+              }
+            }
+          } catch {}
+        }
+        return null;
       } catch {
         return null;
       }
@@ -778,7 +813,7 @@ async function extractAssignmentsFromPage(
               page.waitForTimeout(300),
             ]);
           } else {
-            await page.goto("https://admissions.aurora.edu.in/modules/assessments/assessments", {
+            await page.goto('https://www.sidus.net/modules/assessments/assessments', {
               waitUntil: "domcontentloaded",
               timeout: 20000,
             });
@@ -1046,10 +1081,26 @@ export async function saveERPSession(
   cookies: Array<{ name: string; value: string; domain: string; path: string }>,
   credentials?: { username: string; password: string }
 ): Promise<string> {
+  const normalizedErpUrl = (!erpUrl || erpUrl.includes('admissions.aurora.edu.in'))
+    ? 'https://www.sidus.net/modules/assessments/assessments'
+    : erpUrl;
+
+  // Cleanup legacy aurora connection record for this user to avoid conflicts
+  if (normalizedErpUrl !== erpUrl || erpUrl.includes('admissions.aurora.edu.in')) {
+    try {
+      await prisma.eRPConnection.deleteMany({
+        where: {
+          userId,
+          erpUrl: { contains: 'admissions.aurora.edu.in' },
+        },
+      });
+    } catch {}
+  }
+
   let credsToStore = credentials;
   if (!credsToStore) {
     const existingConn = await prisma.eRPConnection.findUnique({
-      where: { userId_erpUrl: { userId, erpUrl } },
+      where: { userId_erpUrl: { userId, erpUrl: normalizedErpUrl } },
     });
     if (existingConn?.sessionCookies) {
       const existing = parseStoredSession(existingConn.sessionCookies);
@@ -1068,10 +1119,10 @@ export async function saveERPSession(
   const expiry = new Date(Date.now() + 12 * 60 * 60 * 1000);
 
   const connection = await prisma.eRPConnection.upsert({
-    where: { userId_erpUrl: { userId, erpUrl } },
+    where: { userId_erpUrl: { userId, erpUrl: normalizedErpUrl } },
     create: {
       userId,
-      erpUrl,
+      erpUrl: normalizedErpUrl,
       sessionCookies: encryptedPayload,
       sessionExpiry: expiry,
       isActive: true,
@@ -1122,12 +1173,14 @@ export async function authenticateAndSyncWithCredentials(
 
     const page = await context.newPage();
 
-    // 1. Verify credentials via direct Aurora auth API in ~1.2s
-    await performAuroraLogin(page, username, password);
+    // 1. Verify credentials via direct portal auth API in ~1.2s
+    const portalBase = erpUrl ? new URL(erpUrl).origin : 'https://www.sidus.net';
+    await performAuroraLogin(page, username, password, `${portalBase}/login`);
 
     // 2. Navigate to assessments module for extraction
-    logger.info(`[ERP] Navigating to assessments module for ${username}...`);
-    await page.goto('https://admissions.aurora.edu.in/modules/assessments/assessments', {
+    const targetAssessmentsUrl = erpUrl || 'https://www.sidus.net/modules/assessments/assessments';
+    logger.info(`[ERP] Navigating to assessments module (${targetAssessmentsUrl}) for ${username}...`);
+    await page.goto(targetAssessmentsUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 20000,
     }).catch(() => {});
@@ -1212,7 +1265,7 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
       .map((c: any) => ({
         name: String(c.name || c.key || '').trim(),
         value: String(c.value || '').trim(),
-        domain: c.domain || '.aurora.edu.in',
+        domain: c.domain || '.sidus.net',
         path: c.path || '/',
       }))
       .filter((c) => c.name && c.value);
@@ -1243,7 +1296,7 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
             .map(([name, value]) => ({
               name: name.trim(),
               value: String(value).trim(),
-              domain: '.aurora.edu.in',
+              domain: '.sidus.net',
               path: '/',
             }))
             .filter((c) => c.name && c.value);
@@ -1261,7 +1314,7 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
         const name = pair.slice(0, idx).trim();
         const value = pair.slice(idx + 1).trim();
         if (name && value) {
-          results.push({ name, value, domain: '.aurora.edu.in', path: '/' });
+          results.push({ name, value, domain: '.sidus.net', path: '/' });
         }
       }
     }
@@ -1317,7 +1370,8 @@ export async function authenticateAndSyncWithCookies(
         }))
       );
       const page = await context.newPage();
-      await page.goto('https://admissions.aurora.edu.in/modules/assessments/assessments', {
+      const targetAssessmentsUrl = erpUrl || 'https://www.sidus.net/modules/assessments/assessments';
+      await page.goto(targetAssessmentsUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 20000,
       });
@@ -1325,7 +1379,7 @@ export async function authenticateAndSyncWithCookies(
       const isStillLogin = page.url().includes('login');
       if (isStillLogin) {
         throw new Error(
-          'Session cookies were rejected by Aurora portal (expired or missing connect.sid). Please log in to admissions.aurora.edu.in and copy fresh cookies.'
+          'Session cookies were rejected by Sidus portal (expired or missing connect.sid). Please log in to www.sidus.net and copy fresh cookies.'
         );
       }
 

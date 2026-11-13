@@ -14,3 +14,4 @@ for %%P in (3001 5173 8081) do (
 
 echo [OK] Ports 3001 (Backend), 5173 (Web), 8081 (Mobile) are clean and free.
 echo ===================================================
+

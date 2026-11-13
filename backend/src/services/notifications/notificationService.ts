@@ -128,7 +128,7 @@ export async function sendOngoingOrMissedAssignmentAlert(
   const erpAssignmentUrl =
     assignment.erpUrl ||
     env.AURORA_ERP_URL ||
-    'https://admissions.aurora.edu.in/modules/assessments/assessments';
+    'https://www.sidus.net/modules/assessments/assessments';
 
   // 1. In-App Notification
   await prisma.notification.create({
@@ -191,7 +191,7 @@ export async function sendOngoingOrMissedAssignmentAlert(
       { label: 'Which Assignment', value: assignmentTitle },
       { label: 'Deadline', value: deadlineStr },
       { label: 'Status', value: isOngoing ? 'Ongoing (Pending Submission)' : 'Missed (Overdue)' },
-      { label: 'ERP Portal', value: 'admissions.aurora.edu.in' },
+      { label: 'ERP Portal', value: 'www.sidus.net' },
     ],
   }).catch((err) => logger.warn(`[Notification] Email dispatch warning: ${err.message}`));
 

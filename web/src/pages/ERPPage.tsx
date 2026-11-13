@@ -147,7 +147,7 @@ export function ERPPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">ERP Assignments</h1>
-          <p className="text-slate-400 text-xs sm:text-sm mt-1">Aurora University · Assessment Portal</p>
+          <p className="text-slate-400 text-xs sm:text-sm mt-1">Sidus Portal · Assessment Center</p>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
           <Button variant="outline" onClick={() => setShowSetup(true)} leftIcon={<Settings className="w-4 h-4" />}>
@@ -172,12 +172,12 @@ export function ERPPage() {
             <p className="text-emerald-200/75 text-xs mt-1 leading-relaxed">
               LifePilot runs continuous 24/7 cloud monitoring on{' '}
               <a
-                href="https://admissions.aurora.edu.in/modules/assessments/assessments"
+                href="https://www.sidus.net/modules/assessments/assessments"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline text-emerald-300 hover:text-emerald-100 font-medium"
               >
-                admissions.aurora.edu.in
+                www.sidus.net
               </a>{' '}
               every {conn?.monitoringInterval ?? 5} minutes. You <strong>do not need to stay on this page</strong> or keep your browser open — new assignments and deadlines are automatically synced and alerted via SMS & Gmail 24 hours a day, 7 days a week.
             </p>
@@ -192,7 +192,7 @@ export function ERPPage() {
           <div className="flex-1">
             <p className="text-purple-200 font-semibold text-sm">Live Automated ERP Monitor Active</p>
             <p className="text-purple-300/80 text-xs mt-0.5">
-              Automatically scanning all 10 enrolled subjects on admissions.aurora.edu.in in the background. Assignments refresh live as each course completes.
+              Automatically scanning all enrolled subjects on www.sidus.net in the background. Assignments refresh live as each course completes.
             </p>
           </div>
         </div>
@@ -333,12 +333,12 @@ export function ERPPage() {
           title={isSyncActive ? 'Live sync in progress...' : conn ? 'No assignments in this view' : 'ERP not configured'}
           description={
             isSyncActive
-              ? 'Playwright automation is currently scanning all subjects on admissions.aurora.edu.in. Assignments will appear automatically.'
+              ? 'Playwright automation is currently scanning all subjects on www.sidus.net. Assignments will appear automatically.'
               : conn
               ? filterTab === 'AVAILABLE'
                 ? 'No assignments are currently ongoing. Check the "Submitted & Evaluated" tab.'
                 : 'No assignments match the selected filter.'
-              : 'Connect your Aurora ERP credentials to start automatic live monitoring.'
+              : 'Connect your Sidus ERP credentials to start automatic live monitoring.'
           }
           action={
             conn
@@ -526,7 +526,7 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[
     e.preventDefault();
     const trimmedCookies = rawCookies.trim();
     if (!trimmedCookies) {
-      setError('Please paste your session cookies string or JSON from admissions.aurora.edu.in');
+      setError('Please paste your session cookies string or JSON from www.sidus.net');
       return;
     }
     setSaving(true);
@@ -586,7 +586,7 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[
           <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
             <p className="text-purple-300 font-medium text-sm mb-1">Direct Student Portal Authentication</p>
             <p className="text-purple-200/70 text-xs leading-relaxed">
-              Enter your Aurora ERP credentials. LifePilot verifies your account at admissions.aurora.edu.in, encrypts your session, and starts automated background monitoring across all enrolled subjects.
+              Enter your Sidus ERP credentials. LifePilot verifies your account at www.sidus.net, encrypts your session, and starts automated background monitoring across all enrolled subjects.
             </p>
           </div>
           <div>
@@ -631,14 +631,14 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[
               <p className="text-emerald-300 font-semibold text-sm">100% Cloud-Compatible Session Connection</p>
             </div>
             <p className="text-emerald-200/80 text-xs leading-relaxed mb-3">
-              Directly connects with your active Aurora session cookies. Bypasses all Cloudflare WAF, CAPTCHAs, or datacenter IP restrictions with <strong>0.3s ultra-fast sync</strong>!
+              Directly connects with your active Sidus session cookies. Bypasses all Cloudflare WAF, CAPTCHAs, or datacenter IP restrictions with <strong>0.3s ultra-fast sync</strong>!
             </p>
 
             <div className="bg-black/30 rounded-xl p-3 text-xs text-slate-300 space-y-1.5 border border-white/5">
               <p className="font-medium text-slate-200">How to get your cookies in 10 seconds:</p>
               <ol className="list-decimal list-inside space-y-1 text-slate-300/90 text-[11px] leading-relaxed">
                 <li>
-                  Open <a href="https://admissions.aurora.edu.in" target="_blank" rel="noreferrer" className="text-purple-400 underline inline-flex items-center gap-0.5">admissions.aurora.edu.in <ExternalLink className="w-3 h-3" /></a> and ensure you are logged in.
+                  Open <a href="https://www.sidus.net" target="_blank" rel="noreferrer" className="text-purple-400 underline inline-flex items-center gap-0.5">www.sidus.net <ExternalLink className="w-3 h-3" /></a> and ensure you are logged in.
                 </li>
                 <li>Press <kbd className="bg-slate-700 px-1 py-0.5 rounded text-[10px]">F12</kbd> (or right click → Inspect) and open the <strong>Console</strong> tab.</li>
                 <li>

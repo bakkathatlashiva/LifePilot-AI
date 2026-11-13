@@ -304,9 +304,9 @@ export function ERPScreen() {
                 ]}
               />
               <View>
-                <Text style={styles.connTitle}>Aurora Portal Monitor</Text>
+                <Text style={styles.connTitle}>Sidus Portal Monitor</Text>
                 <Text style={styles.connSub}>
-                  admissions.aurora.edu.in · Sync every {connection?.monitoringInterval || 5}m
+                  www.sidus.net · Sync every {connection?.monitoringInterval || 5}m
                 </Text>
               </View>
             </View>
@@ -506,7 +506,7 @@ export function ERPScreen() {
               <View style={styles.infoBanner}>
                 <Text style={styles.infoTitle}>Direct Portal Authentication</Text>
                 <Text style={styles.infoDesc}>
-                  Enter your Aurora credentials. LifePilot verifies your account at admissions.aurora.edu.in, encrypts your session, and starts automated monitoring.
+                  Enter your Sidus ERP credentials. LifePilot verifies your account at www.sidus.net, encrypts your session, and starts automated monitoring.
                 </Text>
               </View>
 
@@ -546,7 +546,7 @@ export function ERPScreen() {
                 <View style={styles.codeSnippetBox}>
                   <Text style={styles.codeSnippetLabel}>How to get cookies from laptop/browser:</Text>
                   <Text style={styles.codeSnippet}>
-                    1. Login to admissions.aurora.edu.in{'\n'}
+                    1. Login to www.sidus.net{'\n'}
                     2. Press F12 &rarr; Console{'\n'}
                     3. Type copy(document.cookie) and Enter
                   </Text>
