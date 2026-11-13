@@ -56,7 +56,7 @@ export function ERPPage() {
   // Initial load: 0ms instant display from store/localStorage, then silent background revalidation
   useEffect(() => {
     fetchAssignments(allAssignments.length > 0);
-  }, [fetchAssignments, allAssignments.length]);
+  }, [fetchAssignments]);
 
   // Fast & efficient polling only while active sync is executing
   useEffect(() => {
@@ -143,7 +143,7 @@ export function ERPPage() {
   const isSyncActive = conn?.lastSyncStatus === 'RUNNING' || isSyncing;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">ERP Assignments</h1>

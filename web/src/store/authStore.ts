@@ -33,14 +33,19 @@ export const useAuthStore = create<AuthState>()(
       setUser: (user) => set({ user }),
 
       loadProfile: async () => {
-        set({ isLoading: true });
+        const hasSession = !!get().user || !!get().accessToken;
+        if (!hasSession) {
+          set({ isLoading: true });
+        }
         try {
           const { data } = await api.get('/auth/profile');
           set({ user: data.data, isAuthenticated: true });
         } catch {
           set({ isAuthenticated: false, user: null });
         } finally {
-          set({ isLoading: false });
+          if (!hasSession) {
+            set({ isLoading: false });
+          }
         }
       },
 

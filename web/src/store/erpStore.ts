@@ -99,7 +99,17 @@ export const useERPStore = create<ERPState>()(
         try {
           const res = await api.get('/erp/status');
           const latestStatus: ERPStatusData = res.data.data;
-          set({ status: latestStatus });
+          const currentStatus = get().status;
+
+          const statusChanged =
+            !currentStatus ||
+            currentStatus.connection?.lastSyncStatus !== latestStatus.connection?.lastSyncStatus ||
+            currentStatus.connection?.lastSyncAt !== latestStatus.connection?.lastSyncAt ||
+            currentStatus.connection?._count?.assignments !== latestStatus.connection?._count?.assignments;
+
+          if (statusChanged) {
+            set({ status: latestStatus });
+          }
 
           const syncStatus = latestStatus.connection?.lastSyncStatus;
           if (syncStatus === 'SUCCESS' || syncStatus === 'FAILED') {

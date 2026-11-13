@@ -63,9 +63,9 @@ export function ERPScreen() {
   const fetchAssignments = useCallback(async () => {
     try {
       const res = await api.get('/erp/assignments?pageSize=100');
-      if (res.data?.data) {
-        setAssignments(res.data.data);
-      }
+      const raw = res.data?.data;
+      const list = Array.isArray(raw) ? raw : (raw?.assignments ?? []);
+      setAssignments(list);
     } catch {}
   }, []);
 

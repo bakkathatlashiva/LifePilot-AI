@@ -233,6 +233,59 @@ function parseStoredSession(sessionCookiesEncrypted: string | null): {
   return { cookies: [], credentials: null };
 }
 
+export function buildMultiDomainCookies(cookies: Array<{ name: string; value: string; domain?: string; path?: string }>) {
+  const result: Array<{ name: string; value: string; domain: string; path: string }> = [];
+  const targetDomains = ['.sidus.net', 'www.sidus.net', 'admissionsserver.aurora.edu.in', '.aurora.edu.in'];
+
+  for (const c of cookies) {
+    if (!c.name || !c.value) continue;
+    const path = c.path || '/';
+    if (c.domain && !c.domain.includes('localhost')) {
+      result.push({
+        name: c.name,
+        value: c.value,
+        domain: c.domain.startsWith('.') ? c.domain : `.${c.domain}`,
+        path,
+      });
+    }
+    for (const d of targetDomains) {
+      result.push({
+        name: c.name,
+        value: c.value,
+        domain: d,
+        path,
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  return result.filter((c) => {
+    const key = `${c.name}@@${c.domain}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function applyStealthInitScript(context: BrowserContext) {
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    // @ts-ignore
+    window.chrome = { runtime: {} };
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+    if (navigator.permissions && navigator.permissions.query) {
+      const origQuery = navigator.permissions.query.bind(navigator.permissions);
+      // @ts-ignore
+      navigator.permissions.query = (param: any) => {
+        if (param && param.name === 'geolocation') {
+          return Promise.resolve({ state: 'granted', onchange: null } as any);
+        }
+        return origQuery(param);
+      };
+    }
+  });
+}
+
 function getBrowserContextOptions() {
   const isLinux = process.platform !== 'win32';
   const userAgent = isLinux
@@ -246,7 +299,7 @@ function getBrowserContextOptions() {
     viewport: { width: 1280, height: 720 },
     locale: 'en-US',
     permissions: ['geolocation'] as ['geolocation'],
-    geolocation: { latitude: 17.3850, longitude: 78.4867 },
+    geolocation: { latitude: 17.3850, longitude: 78.4867, accuracy: 20 },
     extraHTTPHeaders: {
       'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
       'sec-ch-ua-mobile': '?0',
@@ -366,7 +419,12 @@ async function performAuroraLogin(
     logger.info(`[ERP Login] Auth API response status: ${status} for ${cleanUser}`);
 
     if (status === 200) {
-      await page.waitForTimeout(400);
+      logger.info(`[ERP Login] Auth API succeeded (HTTP 200) for ${cleanUser}! Waiting for session hydration...`);
+      await Promise.race([
+        page.waitForURL((url) => !url.href.includes('login'), { timeout: 8000 }).catch(() => {}),
+        page.waitForFunction(() => !!localStorage.getItem('erpUser'), { timeout: 8000 }).catch(() => {}),
+        page.waitForTimeout(2000),
+      ]);
       return true;
     }
 
@@ -428,7 +486,7 @@ async function performAuroraLogin(
   }
 
   if (pageText.includes('Unable to connect to the backend')) {
-    throw new Error('Sidus University portal backend is temporarily unreachable. Please try again.');
+    throw new Error('Sidus ERP backend connection was blocked. Please switch to the "Session Cookies" tab to connect in 1 second!');
   }
 
   if (
@@ -488,20 +546,15 @@ async function scrapeAssignments(
     });
 
     const context = await browser.newContext(getBrowserContextOptions());
-
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      // @ts-ignore
-      window.chrome = { runtime: {} };
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-    });
+    await applyStealthInitScript(context);
 
     const page = await context.newPage();
 
     const storedSession = parseStoredSession(connection.sessionCookies);
     if (storedSession.cookies && storedSession.cookies.length > 0) {
       try {
-        await context.addCookies(storedSession.cookies);
+        const multiCookies = buildMultiDomainCookies(storedSession.cookies);
+        await context.addCookies(multiCookies);
       } catch (cErr) {
         logger.warn("[ERP] Failed to add stored cookies to context:", cErr);
       }
@@ -569,31 +622,47 @@ async function scrapeAssignments(
 
 export function parseApiAssessmentItems(rawItems: any[]): ERPAssignmentData[] {
   const assignments: ERPAssignmentData[] = [];
+  const flattened: any[] = [];
+
   for (const it of rawItems) {
+    if (it.assessments && Array.isArray(it.assessments)) {
+      for (const a of it.assessments) {
+        flattened.push({
+          ...a,
+          subject: a.subject || it.subject || { name: it.courseName, code: it.courseCode },
+          marks: it.marks ? it.marks[a.id] : a.marks,
+        });
+      }
+    } else {
+      flattened.push(it);
+    }
+  }
+
+  for (const it of flattened) {
+    if (!it || !it.title) continue;
     const cStatus = (it.computedStatus || it.status || '').toUpperCase();
-    // Hide upcoming until they become ongoing / assigned
     if (cStatus === 'UPCOMING') continue;
 
-    const subjectName = it.subject?.name || 'Enrolled Course';
-    const subjectCode = it.subject?.code || 'COURSE';
-    const subject = `${subjectName} (${subjectCode})`;
+    const subjectName = typeof it.subject === 'string' ? it.subject : (it.subject?.name || it.courseName || 'Enrolled Course');
+    const subjectCode = typeof it.subject === 'object' ? (it.subject?.code || it.courseCode || '') : '';
+    const subject = subjectCode ? `${subjectName} (${subjectCode})` : subjectName;
 
-    const marksObtained = it.submission?.marksObtained ?? it.quizAttempt?.score;
+    const marksObtained = it.submission?.marksObtained ?? it.quizAttempt?.score ?? it.marks?.obtained ?? it.marks;
     const marksText =
       marksObtained !== null && marksObtained !== undefined
-        ? `Scored: ${marksObtained}/${it.maxMarks}`
+        ? `Scored: ${marksObtained}/${it.maxMarks ?? 100}`
         : `Max Marks: ${it.maxMarks ?? 'N/A'}`;
 
     const status: AssignmentStatus =
-      cStatus === 'ACTIVE' || cStatus === 'ONGOING' ? 'AVAILABLE' : 'CLOSED';
+      cStatus === 'ACTIVE' || cStatus === 'ONGOING' || cStatus === 'AVAILABLE' ? 'AVAILABLE' : 'CLOSED';
 
     assignments.push({
-      erpId: it.id || `${subjectCode}_${slugify(it.title)}`,
+      erpId: it.id || `${subjectCode || 'course'}_${slugify(it.title)}`,
       title: it.title,
       subject,
       description: `Type: ${it.type || it.method || 'Assessment'}\n${marksText}\nStatus: ${cStatus}`,
-      openingDate: parseDate(it.opensAt || it.submissionStartDate) ?? undefined,
-      closingDate: parseDate(it.dueDate) ?? undefined,
+      openingDate: parseDate(it.opensAt || it.submissionStartDate || it.startDate) ?? undefined,
+      closingDate: parseDate(it.dueDate || it.closesAt || it.closingDate) ?? undefined,
       status,
       maxMarks: it.maxMarks,
       rawData: it,
@@ -604,40 +673,50 @@ export function parseApiAssessmentItems(rawItems: any[]): ERPAssignmentData[] {
 
 async function fetchAssessmentsDirectApi(cookies: any[]): Promise<ERPAssignmentData[] | null> {
   if (!cookies || cookies.length === 0) return null;
-  const cookieString = cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+  const multiCookies = buildMultiDomainCookies(cookies);
+  const cookieString = multiCookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+  const csrfCookie = cookies.find((c: any) => c.name === 'csrf_token' || c.name === 'XSRF-TOKEN');
   const isLinux = process.platform !== 'win32';
   const userAgent = isLinux
     ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
   const endpoints = [
-    'https://www.sidus.net/api/v1/student-portal/me/assessments',
     'https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments',
+    'https://admissionsserver.aurora.edu.in/api/v1/faculty/me/assessments',
+    'https://www.sidus.net/api/v1/student-portal/me/assessments',
   ];
 
   for (const apiUrl of endpoints) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 6000);
-      const hostOrigin = apiUrl.includes('sidus.net') ? 'https://www.sidus.net' : 'https://admissions.aurora.edu.in';
+      const hostOrigin = apiUrl.includes('sidus.net') ? 'https://www.sidus.net' : 'https://admissionsserver.aurora.edu.in';
+      const headers: Record<string, string> = {
+        'Cookie': cookieString,
+        'User-Agent': userAgent,
+        'Accept': 'application/json, text/plain, */*',
+        'Origin': hostOrigin,
+        'Referer': `${hostOrigin}/`,
+        'Accept-Language': 'en-IN,en-GB,en;q=0.9,en-US;q=0.8',
+      };
+      if (csrfCookie) {
+        headers['X-CSRF-Token'] = csrfCookie.value;
+      }
       const res = await fetch(apiUrl, {
         method: 'GET',
-        headers: {
-          'Cookie': cookieString,
-          'User-Agent': userAgent,
-          'Accept': 'application/json, text/plain, */*',
-          'Origin': hostOrigin,
-          'Referer': `${hostOrigin}/`,
-          'Accept-Language': 'en-IN,en-GB,en;q=0.9,en-US;q=0.8',
-        },
+        headers,
         signal: controller.signal,
       });
       clearTimeout(timeout);
       if (res.ok) {
         const json: any = await res.json().catch(() => null);
-        if (json?.data && Array.isArray(json.data) && json.data.length > 0) {
-          logger.info(`[ERP Direct API] ⚡ Fast-path retrieved ${json.data.length} assessment items in < 500ms from ${apiUrl}!`);
-          return parseApiAssessmentItems(json.data);
+        if (json?.data) {
+          const rawList = Array.isArray(json.data) ? json.data : (json.data.assessments || []);
+          if (rawList.length > 0) {
+            logger.info(`[ERP Direct API] ⚡ Fast-path retrieved ${rawList.length} assessment items in < 500ms from ${apiUrl}!`);
+            return parseApiAssessmentItems(rawList);
+          }
         }
       }
     } catch {}
@@ -656,18 +735,31 @@ async function extractAssignmentsFromPage(
     const apiRes: any = await page.evaluate(async () => {
       try {
         const candidateEndpoints = [
+          'https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments',
+          'https://admissionsserver.aurora.edu.in/api/v1/faculty/me/assessments',
           '/api/v1/student-portal/me/assessments',
           `${window.location.origin}/api/v1/student-portal/me/assessments`,
           'https://www.sidus.net/api/v1/student-portal/me/assessments',
-          'https://admissionsserver.aurora.edu.in/api/v1/student-portal/me/assessments',
         ];
+        const csrfMatch = document.cookie.match(/(?:^|; )csrf_token=([^;]*)/);
+        const csrfToken = csrfMatch ? decodeURIComponent(csrfMatch[1]) : '';
+        const headers: Record<string, string> = {
+          'Accept': 'application/json, text/plain, */*',
+        };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+
         for (const ep of candidateEndpoints) {
           try {
-            const res = await fetch(ep, { credentials: 'include' });
+            const res = await fetch(ep, { credentials: 'include', headers });
             if (res.ok) {
               const data = await res.json();
-              if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
-                return data;
+              if (data?.data) {
+                const list = Array.isArray(data.data) ? data.data : (data.data.assessments || []);
+                if (list.length > 0) {
+                  return data;
+                }
               }
             }
           } catch {}
@@ -678,12 +770,14 @@ async function extractAssignmentsFromPage(
       }
     });
 
-    if (apiRes?.data && Array.isArray(apiRes.data) && apiRes.data.length > 0) {
-      const rawItems = apiRes.data;
-      logger.info(`[ERP] Direct API returned ${rawItems.length} total assessment items`);
-      const assignments = parseApiAssessmentItems(rawItems);
-      logger.info(`[ERP] Successfully parsed ${assignments.length} ongoing/submitted/evaluated assignments from official API`);
-      return assignments;
+    if (apiRes?.data) {
+      const rawItems = Array.isArray(apiRes.data) ? apiRes.data : (apiRes.data.assessments || []);
+      if (rawItems.length > 0) {
+        logger.info(`[ERP] Direct API returned ${rawItems.length} total assessment items`);
+        const assignments = parseApiAssessmentItems(rawItems);
+        logger.info(`[ERP] Successfully parsed ${assignments.length} ongoing/submitted/evaluated assignments from official API`);
+        return assignments;
+      }
     }
   } catch (apiErr) {
     logger.warn('[ERP] Direct API extraction failed, falling back to DOM scraper:', apiErr);
@@ -1110,8 +1204,9 @@ export async function saveERPSession(
     }
   }
 
+  const multiCookies = buildMultiDomainCookies(cookies);
   const payload = {
-    cookies,
+    cookies: multiCookies,
     ...(credsToStore ? { credentials: credsToStore } : {}),
   };
   const encryptedPayload = encrypt(JSON.stringify(payload));
@@ -1163,13 +1258,7 @@ export async function authenticateAndSyncWithCredentials(
 
   try {
     const context = await browser.newContext(getBrowserContextOptions());
-
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      // @ts-ignore
-      window.chrome = { runtime: {} };
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-    });
+    await applyStealthInitScript(context);
 
     const page = await context.newPage();
 
@@ -1259,9 +1348,11 @@ export async function authenticateAndSyncWithCredentials(
 export function parseCookieInput(input: any): Array<{ name: string; value: string; domain: string; path: string }> {
   if (!input) return [];
 
+  let rawList: Array<{ name: string; value: string; domain?: string; path?: string }> = [];
+
   // 1. Array of cookie objects (e.g. from Cookie-Editor / EditThisCookie)
   if (Array.isArray(input)) {
-    return input
+    rawList = input
       .map((c: any) => ({
         name: String(c.name || c.key || '').trim(),
         value: String(c.value || '').trim(),
@@ -1269,6 +1360,7 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
         path: c.path || '/',
       }))
       .filter((c) => c.name && c.value);
+    return buildMultiDomainCookies(rawList);
   }
 
   if (typeof input === 'string') {
@@ -1292,7 +1384,7 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
           if (Array.isArray(parsed.cookies)) {
             return parseCookieInput(parsed.cookies);
           }
-          return Object.entries(parsed)
+          const list = Object.entries(parsed)
             .map(([name, value]) => ({
               name: name.trim(),
               value: String(value).trim(),
@@ -1300,6 +1392,7 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
               path: '/',
             }))
             .filter((c) => c.name && c.value);
+          return buildMultiDomainCookies(list);
         }
       } catch {}
     }
@@ -1318,7 +1411,7 @@ export function parseCookieInput(input: any): Array<{ name: string; value: strin
         }
       }
     }
-    return results;
+    return buildMultiDomainCookies(results);
   }
 
   return [];
@@ -1361,14 +1454,9 @@ export async function authenticateAndSyncWithCookies(
 
     try {
       const context = await browser.newContext(getBrowserContextOptions());
-      await context.addCookies(
-        cookies.map((c) => ({
-          name: c.name,
-          value: c.value,
-          domain: c.domain.startsWith('.') ? c.domain : `.${c.domain}`,
-          path: c.path || '/',
-        }))
-      );
+      await applyStealthInitScript(context);
+      const multiCookies = buildMultiDomainCookies(cookies);
+      await context.addCookies(multiCookies);
       const page = await context.newPage();
       const targetAssessmentsUrl = erpUrl || 'https://www.sidus.net/modules/assessments/assessments';
       await page.goto(targetAssessmentsUrl, {
