@@ -26,7 +26,7 @@ export function isAllowedRedirect(urlStr: string): boolean {
     const frontendUrl = new URL(env.FRONTEND_URL);
     if (
       parsed.origin === frontendUrl.origin ||
-      parsed.hostname === 'lifepilot-ai-web.onrender.com' ||
+      parsed.hostname.endsWith('.onrender.com') ||
       parsed.hostname.endsWith('.vercel.app') ||
       parsed.hostname.endsWith('.tmp.now')
     ) {
@@ -205,9 +205,6 @@ export const AUTH_SCOPES = [
   'openid',
   'email',
   'profile',
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.labels',
 ];
 
 export function getGoogleAuthUrl(scopes: string[] = AUTH_SCOPES, state?: string, redirectUri?: string): string {

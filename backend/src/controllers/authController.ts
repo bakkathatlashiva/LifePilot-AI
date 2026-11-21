@@ -67,6 +67,13 @@ export function resolveGoogleRedirectUri(req: Request, _returnTo?: string): stri
     return custom;
   }
 
+  // If host indicates Render production, ensure redirect URI matches the live domain
+  const host = req.headers.host;
+  if (host && host.includes('onrender.com')) {
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    return `${proto}://${host}/api/auth/google/callback`;
+  }
+
   // Always use configured GOOGLE_REDIRECT_URI as the authoritative redirect URI registered with Google Cloud
   return env.GOOGLE_REDIRECT_URI;
 }
