@@ -473,7 +473,7 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[
   const [activeTab, setActiveTab] = useState<'credentials' | 'cookies'>('credentials');
 
   // Credentials tab state
-  const [username, setUsername] = useState('252U1R9175');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
   // Cookies tab state

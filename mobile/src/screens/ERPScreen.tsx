@@ -44,7 +44,7 @@ function ERPInnerScreen() {
 
   // Setup modal state
   const [setupMode, setSetupMode] = useState<'credentials' | 'cookies'>('credentials');
-  const [username, setUsername] = useState('252U1R9175');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rawCookies, setRawCookies] = useState('');
   const [setupSaving, setSetupSaving] = useState(false);
@@ -544,7 +544,7 @@ function ERPInnerScreen() {
                 label="Student User ID / Email / Hall Ticket"
                 value={username}
                 onChangeText={setUsername}
-                placeholder="252U1R9175"
+                placeholder="Enter Student ID / Roll Number or Email"
               />
 
               <Input
