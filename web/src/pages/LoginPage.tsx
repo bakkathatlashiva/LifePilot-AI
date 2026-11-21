@@ -17,12 +17,17 @@ export function LoginPage() {
     const refreshToken = searchParams.get('refreshToken');
     if (accessToken && refreshToken) {
       setTokens(accessToken, refreshToken);
-      loadProfile().then(() => navigate('/dashboard'));
+      loadProfile().then(() => navigate('/dashboard', { replace: true }));
     }
   }, [searchParams, setTokens, loadProfile, navigate]);
 
   useEffect(() => {
-    if (isAuthenticated) navigate('/dashboard');
+    const hasTokens = !!localStorage.getItem('accessToken') || !!localStorage.getItem('refreshToken');
+    if (isAuthenticated && hasTokens) {
+      navigate('/dashboard', { replace: true });
+    } else if (isAuthenticated && !hasTokens) {
+      useAuthStore.getState().logout();
+    }
   }, [isAuthenticated, navigate]);
 
   const handleGoogleLogin = () => {

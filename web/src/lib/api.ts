@@ -34,7 +34,7 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (v: string) => void; reject: (e: unknown) => void }> = [];
 
-function processQueue(error: unknown, token: string | null) {
+function processQueue(error: unknown, token: string | null = null) {
   failedQueue.forEach((prom) => {
     if (error) prom.reject(error);
     else prom.resolve(token!);
@@ -42,10 +42,55 @@ function processQueue(error: unknown, token: string | null) {
   failedQueue = [];
 }
 
+function handleAuthFailure(error: unknown) {
+  processQueue(error, null);
+  isRefreshing = false;
+
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+
+  // Purge Zustand persisted storage so stale state doesn't resurrect on navigation
+  try {
+    const raw = localStorage.getItem('lifepilot-auth');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.state) {
+        parsed.state.accessToken = null;
+        parsed.state.refreshToken = null;
+        parsed.state.isAuthenticated = false;
+        parsed.state.user = null;
+        localStorage.setItem('lifepilot-auth', JSON.stringify(parsed));
+      }
+    }
+  } catch {}
+
+  // Broadcast event so active React state resets without hard page reload
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('lifepilot:unauthorized'));
+
+    // Only redirect if not already on the login or public auth routes
+    const pathname = window.location.pathname;
+    if (!pathname.startsWith('/login') && !pathname.startsWith('/auth/')) {
+      window.location.replace('/login');
+    }
+  }
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    const url = originalRequest?.url || '';
+
+    // Bypass 401 interceptor for auth endpoints to prevent loops
+    if (
+      url.includes('/auth/refresh') ||
+      url.includes('/auth/login') ||
+      url.includes('/auth/google') ||
+      url.includes('/auth/exchange-code')
+    ) {
+      return Promise.reject(error);
+    }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
@@ -62,8 +107,7 @@ api.interceptors.response.use(
 
       const refreshToken = localStorage.getItem('refreshToken');
       if (!refreshToken) {
-        localStorage.removeItem('accessToken');
-        window.location.href = '/login';
+        handleAuthFailure(error);
         return Promise.reject(error);
       }
 
@@ -73,12 +117,10 @@ api.interceptors.response.use(
         localStorage.setItem('accessToken', newToken);
         processQueue(null, newToken);
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        isRefreshing = false;
         return api(originalRequest);
       } catch (refreshError) {
-        processQueue(refreshError, null);
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        window.location.href = '/login';
+        handleAuthFailure(refreshError);
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

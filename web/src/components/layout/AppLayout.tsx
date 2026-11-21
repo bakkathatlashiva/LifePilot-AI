@@ -66,12 +66,14 @@ export function AppLayout() {
   const location = useLocation();
 
   useEffect(() => {
-    loadProfile();
-  }, [loadProfile]);
+    if (isAuthenticated) {
+      loadProfile();
+    }
+  }, [isAuthenticated, loadProfile]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      navigate('/login');
+      navigate('/login', { replace: true });
     }
   }, [isAuthenticated, isLoading, navigate]);
 

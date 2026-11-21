@@ -33,7 +33,13 @@ export const useAuthStore = create<AuthState>()(
       setUser: (user) => set({ user }),
 
       loadProfile: async () => {
-        const hasSession = !!get().user || !!get().accessToken;
+        const token = localStorage.getItem('accessToken') || get().accessToken;
+        if (!token) {
+          get().logout();
+          return;
+        }
+
+        const hasSession = !!get().user;
         if (!hasSession) {
           set({ isLoading: true });
         }
@@ -41,7 +47,7 @@ export const useAuthStore = create<AuthState>()(
           const { data } = await api.get('/auth/profile');
           set({ user: data.data, isAuthenticated: true });
         } catch {
-          set({ isAuthenticated: false, user: null });
+          get().logout();
         } finally {
           if (!hasSession) {
             set({ isLoading: false });
@@ -66,3 +72,9 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('lifepilot:unauthorized', () => {
+    useAuthStore.getState().logout();
+  });
+}
