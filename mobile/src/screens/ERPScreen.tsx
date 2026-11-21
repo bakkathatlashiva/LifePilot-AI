@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
@@ -11,11 +10,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { format } from 'date-fns';
 import { useNavigation } from '@react-navigation/native';
 import api from '../lib/api';
 import { ERPAssignment } from '../types';
 import { colors } from '../theme/colors';
+import { safeFormatDate } from '../lib/date';
+import { ScreenErrorBoundary } from '../components/ui/ScreenErrorBoundary';
 import { AppHeader } from '../components/ui/AppHeader';
 import { AppDrawer } from '../components/navigation/AppDrawer';
 import { Card } from '../components/ui/Card';
@@ -25,7 +25,7 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState } from '../components/ui/EmptyState';
 
-export function ERPScreen() {
+function ERPInnerScreen() {
   const navigation = useNavigation<any>();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -55,24 +55,38 @@ export function ERPScreen() {
     try {
       const res = await api.get('/erp/status');
       if (res.data?.data) {
-        setConnection(res.data.data.connection);
+        setConnection(res.data.data.connection || null);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('[ERPScreen] fetchStatus error:', err);
+    }
   }, []);
 
   const fetchAssignments = useCallback(async () => {
     try {
       const res = await api.get('/erp/assignments?pageSize=100');
       const raw = res.data?.data;
-      const list = Array.isArray(raw) ? raw : (raw?.assignments ?? []);
+      const list = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.assignments)
+        ? raw.assignments
+        : [];
       setAssignments(list);
-    } catch {}
+    } catch (err) {
+      console.warn('[ERPScreen] fetchAssignments error:', err);
+      setAssignments([]);
+    }
   }, []);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([fetchStatus(), fetchAssignments()]);
-    setLoading(false);
-    setRefreshing(false);
+    try {
+      await Promise.all([fetchStatus(), fetchAssignments()]);
+    } catch (err) {
+      console.warn('[ERPScreen] loadAll error:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [fetchStatus, fetchAssignments]);
 
   useEffect(() => {
@@ -159,34 +173,39 @@ export function ERPScreen() {
     }
   };
 
-  // Metrics
+  // Safe metrics computation
   const metrics = useMemo(() => {
+    const safeList = Array.isArray(assignments) ? assignments : [];
     let ongoing = 0;
     let closed = 0;
     let newCount = 0;
-    for (const a of assignments) {
+    for (const a of safeList) {
+      if (!a) continue;
       if (a.status === 'AVAILABLE') ongoing++;
       else if (a.status === 'CLOSED') closed++;
       if (a.isNew) newCount++;
     }
-    return { total: assignments.length, ongoing, closed, newCount };
+    return { total: safeList.length, ongoing, closed, newCount };
   }, [assignments]);
 
-  // Filtered
+  // Safe filtered assignments
   const filteredAssignments = useMemo(() => {
+    const safeList = Array.isArray(assignments) ? assignments.filter(Boolean) : [];
     if (activeTab === 'AVAILABLE') {
-      return assignments.filter((a) => a.status === 'AVAILABLE');
+      return safeList.filter((a) => a.status === 'AVAILABLE');
     }
     if (activeTab === 'CLOSED') {
-      return assignments.filter((a) => a.status === 'CLOSED');
+      return safeList.filter((a) => a.status === 'CLOSED');
     }
-    return assignments;
+    return safeList;
   }, [assignments, activeTab]);
 
-  const renderAssignmentCard = ({ item: a }: { item: ERPAssignment }) => {
+  const renderAssignmentCard = (a: ERPAssignment, index: number) => {
+    if (!a) return null;
     const isOngoing = a.status === 'AVAILABLE';
-    const rawStatus = ((a.rawData as any)?.statusRaw || '').toUpperCase();
-    const descUpper = (a.description || '').toUpperCase();
+    const rawStatus = (typeof (a.rawData as any)?.statusRaw === 'string' ? (a.rawData as any).statusRaw : '').toUpperCase();
+    const descText = typeof a.description === 'string' ? a.description : '';
+    const descUpper = descText.toUpperCase();
     const isEvaluated =
       descUpper.includes('EVALUATED') || descUpper.includes('RESULT') || rawStatus.includes('EVALUATED');
     const isSubmitted =
@@ -195,36 +214,41 @@ export function ERPScreen() {
     const badgeText = isOngoing ? 'Ongoing' : isEvaluated ? 'Evaluated' : isSubmitted ? 'Submitted' : 'Closed';
     const badgeVariant = isOngoing ? 'success' : isEvaluated ? 'info' : 'purple';
 
+    const subjectStr = typeof a.subject === 'string' ? a.subject : (a.subject ? (a.subject as any).name || '' : '');
+    const titleStr = typeof a.title === 'string' ? a.title : String(a.title || 'Assignment');
+    const closingFormatted = safeFormatDate(a.closingDate, 'MMM d, yyyy h:mm a');
+
     return (
       <Card
+        key={a.id || a.erpId || `erp-card-${index}`}
         onClick={() => setSelectedAssignment(a)}
         style={styles.assignmentCard}
       >
         <View style={styles.cardHeader}>
           <View style={styles.tagRow}>
-            {a.isNew && <Badge variant="info" dot>New</Badge>}
+            {Boolean(a.isNew) && <Badge variant="info" dot>New</Badge>}
             <Badge variant={badgeVariant as any}>{badgeText}</Badge>
-            {a.subject && (
+            {subjectStr ? (
               <View style={styles.subjectPill}>
-                <Text style={styles.subjectPillText}>{a.subject}</Text>
+                <Text style={styles.subjectPillText} numberOfLines={1}>{subjectStr}</Text>
               </View>
-            )}
+            ) : null}
           </View>
           <Text style={styles.arrowIcon}>→</Text>
         </View>
 
         <Text style={styles.assignmentTitle} numberOfLines={2}>
-          {a.title}
+          {titleStr}
         </Text>
 
-        {a.description ? (
+        {descText ? (
           <Text style={styles.assignmentDesc} numberOfLines={2}>
-            {a.description}
+            {descText}
           </Text>
         ) : null}
 
         <View style={styles.dateRow}>
-          {a.closingDate ? (
+          {closingFormatted ? (
             <Text
               style={[
                 styles.deadlineDate,
@@ -232,19 +256,23 @@ export function ERPScreen() {
               ]}
             >
               {isOngoing ? 'Due: ' : 'Deadline: '}
-              {format(new Date(a.closingDate), 'MMM d, yyyy h:mm a')}
+              {closingFormatted}
             </Text>
           ) : (
             <Text style={styles.noDeadline}>No deadline specified</Text>
           )}
 
           {a.maxMarks !== undefined && a.maxMarks !== null ? (
-            <Text style={styles.marksText}>{a.maxMarks} Marks</Text>
+            <Text style={styles.marksText}>{String(a.maxMarks)} Marks</Text>
           ) : null}
         </View>
       </Card>
     );
   };
+
+  const lastSyncFormatted = connection?.lastSyncAt
+    ? safeFormatDate(connection.lastSyncAt, 'MMM d, h:mm a')
+    : null;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -319,9 +347,9 @@ export function ERPScreen() {
             </Badge>
           </View>
 
-          {connection?.lastSyncAt ? (
+          {lastSyncFormatted ? (
             <Text style={styles.lastSyncText}>
-              Last Synced: {format(new Date(connection.lastSyncAt), 'MMM d, h:mm a')}
+              Last Synced: {lastSyncFormatted}
             </Text>
           ) : null}
         </Card>
@@ -393,11 +421,7 @@ export function ERPScreen() {
           />
         ) : (
           <View style={{ gap: 10 }}>
-            {filteredAssignments.map((a) => (
-              <React.Fragment key={a.id}>
-                {renderAssignmentCard({ item: a })}
-              </React.Fragment>
-            ))}
+            {filteredAssignments.map((a, idx) => renderAssignmentCard(a, idx))}
           </View>
         )}
       </ScrollView>
@@ -410,42 +434,48 @@ export function ERPScreen() {
       >
         {selectedAssignment && (
           <View style={styles.modalContent}>
-            <Text style={styles.detailTitle}>{selectedAssignment.title}</Text>
-            {selectedAssignment.subject && (
-              <Text style={styles.detailSubject}>{selectedAssignment.subject}</Text>
-            )}
+            <Text style={styles.detailTitle}>
+              {typeof selectedAssignment.title === 'string' ? selectedAssignment.title : String(selectedAssignment.title || '')}
+            </Text>
+            {selectedAssignment.subject ? (
+              <Text style={styles.detailSubject}>
+                {typeof selectedAssignment.subject === 'string'
+                  ? selectedAssignment.subject
+                  : String((selectedAssignment.subject as any)?.name || '')}
+              </Text>
+            ) : null}
 
             {selectedAssignment.description ? (
               <View style={styles.detailDescBox}>
-                <Text style={styles.detailDescText}>{selectedAssignment.description}</Text>
+                <Text style={styles.detailDescText}>{String(selectedAssignment.description)}</Text>
               </View>
             ) : null}
 
             <View style={styles.metaGrid}>
-              {selectedAssignment.openingDate ? (
+              {selectedAssignment.openingDate && safeFormatDate(selectedAssignment.openingDate, 'PPP p') ? (
                 <View style={styles.metaBox}>
                   <Text style={styles.metaLabel}>Opening Date</Text>
                   <Text style={styles.metaVal}>
-                    {format(new Date(selectedAssignment.openingDate), 'PPP p')}
+                    {safeFormatDate(selectedAssignment.openingDate, 'PPP p')}
                   </Text>
                 </View>
               ) : null}
 
-              {selectedAssignment.closingDate ? (
+              {selectedAssignment.closingDate && safeFormatDate(selectedAssignment.closingDate, 'PPP p') ? (
                 <View style={styles.metaBox}>
                   <Text style={styles.metaLabel}>Closing Date</Text>
                   <Text style={styles.metaVal}>
-                    {format(new Date(selectedAssignment.closingDate), 'PPP p')}
+                    {safeFormatDate(selectedAssignment.closingDate, 'PPP p')}
                   </Text>
                 </View>
               ) : null}
 
-              {selectedAssignment.maxMarks !== undefined && (
+              {selectedAssignment.maxMarks !== undefined && selectedAssignment.maxMarks !== null ? (
                 <View style={styles.metaBox}>
                   <Text style={styles.metaLabel}>Max Marks</Text>
-                  <Text style={styles.metaVal}>{selectedAssignment.maxMarks}</Text>
+                  <Text style={styles.metaVal}>{String(selectedAssignment.maxMarks)}</Text>
                 </View>
-              )}
+              ) : null}
             </View>
           </View>
         )}
@@ -589,6 +619,14 @@ export function ERPScreen() {
   );
 }
 
+export function ERPScreen() {
+  return (
+    <ScreenErrorBoundary fallbackTitle="ERP Portal">
+      <ERPInnerScreen />
+    </ScreenErrorBoundary>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   headerActions: { flexDirection: 'row', gap: 6, alignItems: 'center' },
@@ -626,6 +664,7 @@ const styles = StyleSheet.create({
     borderRadius: 9999,
     paddingHorizontal: 8,
     paddingVertical: 2,
+    maxWidth: '60%',
   },
   subjectPillText: { fontSize: 11, color: colors.primaryLight, fontWeight: '600' },
   arrowIcon: { fontSize: 16, color: colors.textMuted },

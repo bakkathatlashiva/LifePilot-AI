@@ -21,6 +21,7 @@ import {
   addMonths,
   subMonths,
 } from 'date-fns';
+import { safeFormatDate } from '../lib/date';
 import { useNavigation } from '@react-navigation/native';
 import api from '../lib/api';
 import { Task } from '../types';
@@ -245,7 +246,7 @@ export function CalendarScreen() {
 
                   {task.deadline && (
                     <Text style={styles.agendaTime}>
-                      ⏰ Due at {format(new Date(task.deadline), 'h:mm a')}
+                      ⏰ Due at {safeFormatDate(task.deadline, 'h:mm a')}
                     </Text>
                   )}
                 </Card>

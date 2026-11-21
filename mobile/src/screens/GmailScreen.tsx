@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../lib/date';
 import { useNavigation } from '@react-navigation/native';
 import * as WebBrowser from 'expo-web-browser';
 import api, { API_BASE_URL } from '../lib/api';
@@ -157,7 +158,7 @@ export function GmailScreen() {
     setEditingSuggestion(s);
     setEditTitle(s.title);
     setEditDeadline(
-      s.suggestedDueDate ? format(new Date(s.suggestedDueDate), 'yyyy-MM-dd HH:mm') : ''
+      safeFormatDate(s.suggestedDueDate, 'yyyy-MM-dd HH:mm')
     );
   };
 
@@ -212,7 +213,7 @@ export function GmailScreen() {
 
         {s.suggestedDueDate ? (
           <Text style={styles.dueDateText}>
-            📅 Suggested Due: {format(new Date(s.suggestedDueDate), 'MMM d, yyyy h:mm a')}
+            📅 Suggested Due: {safeFormatDate(s.suggestedDueDate, 'MMM d, yyyy h:mm a')}
           </Text>
         ) : null}
 
@@ -277,7 +278,7 @@ export function GmailScreen() {
             )}
           </View>
           <Text style={styles.emailDate}>
-            {email.receivedAt ? format(new Date(email.receivedAt), 'MMM d') : ''}
+            {safeFormatDate(email.receivedAt, 'MMM d')}
           </Text>
         </View>
 
@@ -508,9 +509,7 @@ export function GmailScreen() {
             <View style={styles.emailMetaRow}>
               <Text style={styles.emailMetaSender}>{selectedEmail.sender}</Text>
               <Text style={styles.emailMetaDate}>
-                {selectedEmail.receivedAt
-                  ? format(new Date(selectedEmail.receivedAt), 'PPP p')
-                  : ''}
+                {safeFormatDate(selectedEmail.receivedAt, 'PPP p')}
               </Text>
             </View>
 

@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../lib/date';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import { Task, DashboardStats } from '../types';
@@ -202,8 +203,8 @@ export function DashboardScreen() {
               </Badge>
             </View>
             <Text style={styles.integSub} numberOfLines={1}>
-              {erpStatus?.lastSyncAt
-                ? `Synced ${format(new Date(erpStatus.lastSyncAt), 'MMM d, h:mm a')}`
+              {erpStatus?.lastSyncAt && safeFormatDate(erpStatus.lastSyncAt, 'MMM d, h:mm a')
+                ? `Synced ${safeFormatDate(erpStatus.lastSyncAt, 'MMM d, h:mm a')}`
                 : 'Automated 24/7 Monitor'}
             </Text>
             <View style={styles.integBtnRow}>
@@ -311,7 +312,7 @@ export function DashboardScreen() {
                     </Text>
                     {task.deadline && (
                       <Text style={styles.taskDeadline}>
-                        Due {format(new Date(task.deadline), 'MMM d, h:mm a')}
+                        Due {safeFormatDate(task.deadline, 'MMM d, h:mm a')}
                       </Text>
                     )}
                   </View>

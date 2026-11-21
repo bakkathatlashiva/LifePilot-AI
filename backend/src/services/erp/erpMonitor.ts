@@ -310,6 +310,108 @@ function getBrowserContextOptions() {
 }
 
 /**
+ * Direct HTTP API Auth Fast-Path.
+ * Connects directly to Aurora/Sidus auth API in ~300ms without launching a browser.
+ */
+export async function attemptDirectApiLogin(
+  username: string,
+  password: string
+): Promise<{ cookies: Array<{ name: string; value: string; domain: string; path: string }> } | null> {
+  const cleanUser = username.trim().includes('@') ? username.trim() : username.trim().toUpperCase();
+  const cleanPass = password.trim();
+
+  const authEndpoints = [
+    'https://admissionsserver.aurora.edu.in/api/auth/login',
+    'https://www.sidus.net/api/auth/login',
+  ];
+
+  const payload = JSON.stringify({
+    userId: cleanUser,
+    password: cleanPass,
+    location: {
+      latitude: 17.385,
+      longitude: 78.4867,
+      accuracy: 20,
+      capturedAt: Date.now(),
+    },
+  });
+
+  const isLinux = process.platform !== 'win32';
+  const userAgent = isLinux
+    ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+  for (const url of authEndpoints) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/plain, */*',
+          'Origin': 'https://www.sidus.net',
+          'Referer': 'https://www.sidus.net/login',
+          'User-Agent': userAgent,
+        },
+        body: payload,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.status === 401 || res.status === 400) {
+        const errJson: any = await res.json().catch(() => null);
+        throw new Error(
+          errJson?.error ||
+          errJson?.message ||
+          'Invalid ERP credentials. Please check your Student User ID and Password.'
+        );
+      }
+
+      if (res.ok) {
+        logger.info(`[ERP Direct Auth] ⚡ Direct API auth succeeded (HTTP 200) at ${url}!`);
+        const cookies: Array<{ name: string; value: string; domain: string; path: string }> = [];
+        const rawSetCookies: string[] = typeof (res.headers as any).getSetCookie === 'function'
+          ? (res.headers as any).getSetCookie()
+          : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')!] : []);
+
+        for (const header of rawSetCookies) {
+          const parts = header.split(';');
+          const [first] = parts;
+          if (first) {
+            const idx = first.indexOf('=');
+            if (idx > 0) {
+              const name = first.slice(0, idx).trim();
+              const value = first.slice(idx + 1).trim();
+              cookies.push({ name, value, domain: '.sidus.net', path: '/' });
+            }
+          }
+        }
+
+        const data: any = await res.json().catch(() => null);
+        const token = data?.token || data?.accessToken || data?.data?.token || data?.data?.accessToken;
+        if (token) {
+          cookies.push({ name: 'token', value: token, domain: '.sidus.net', path: '/' });
+          cookies.push({ name: 'connect.sid', value: token, domain: '.sidus.net', path: '/' });
+        }
+
+        if (cookies.length > 0) {
+          return { cookies: buildMultiDomainCookies(cookies) };
+        }
+      }
+    } catch (err: any) {
+      if (err.message && err.message.includes('Invalid ERP credentials')) {
+        throw err;
+      }
+      logger.info(`[ERP Direct Auth] Direct login attempt at ${url} bypassed: ${err.message}`);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Helper to perform robust and fast Aurora / Sidus ERP login.
  * Listens directly to portal auth API for immediate verification.
  */
@@ -325,13 +427,13 @@ async function performAuroraLogin(
 
   logger.info(`[ERP Login] Attempting fast login for ${cleanUser} at ${targetLoginUrl}...`);
 
-  // Block heavy images to ensure fast responsiveness (do not block SVG/fonts needed for UI hydration)
-  await page.route(/\.(png|jpg|jpeg|webp|gif)(\?.*)?$/i, (route) => route.abort());
+  // Block images, fonts, media, and svgs to ensure lightning fast responsiveness
+  await page.route(/\.(png|jpg|jpeg|webp|gif|svg|woff|woff2|ttf|otf|mp4|webm|ico)(\?.*)?$/i, (route) => route.abort());
 
   if (!page.url().includes('login')) {
     await page.goto(targetLoginUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 20000,
+      timeout: 15000,
     });
   }
 
@@ -346,9 +448,9 @@ async function performAuroraLogin(
     );
   }
 
-  // Allow Next.js client hydration and CSRF initialization to complete
+  // Wait for #credential input
   try {
-    await page.waitForSelector('#credential', { timeout: 12000 });
+    await page.waitForSelector('#credential', { timeout: 8000 });
   } catch {
     const isCloudflare = await page.evaluate(() => {
       const text = document.body?.innerText || '';
@@ -370,22 +472,9 @@ async function performAuroraLogin(
     );
   }
 
-  await Promise.race([
-    page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {}),
-    page.waitForTimeout(800),
-  ]);
-
-  // Click, clear, and fill inputs with full React event dispatch
-  await page.click('#credential');
+  // Fill inputs directly with native Playwright actions
   await page.fill('#credential', cleanUser);
-  await page.dispatchEvent('#credential', 'input');
-  await page.dispatchEvent('#credential', 'change');
-
-  await page.click('#password');
   await page.fill('#password', cleanPass);
-  await page.dispatchEvent('#password', 'input');
-  await page.dispatchEvent('#password', 'change');
-  await page.waitForTimeout(300);
 
   // Set up response listener for any POST auth/login request
   const authResponsePromise = page.waitForResponse(
@@ -397,14 +486,14 @@ async function performAuroraLogin(
         res.url().includes('credential') ||
         res.url().includes('sidus') ||
         res.url().includes('admissionsserver')),
-    { timeout: 15000 }
+    { timeout: 12000 }
   ).catch(() => null);
 
   // Race URL navigation, dashboard selector, or auth response
-  const navPromise = page.waitForURL((url) => !url.href.includes('login'), { timeout: 15000 }).catch(() => null);
+  const navPromise = page.waitForURL((url) => !url.href.includes('login'), { timeout: 12000 }).catch(() => null);
   const selectorPromise = page.waitForSelector(
     '.dashboard, .navbar, #content, [class*="assessment"], table',
-    { timeout: 15000 }
+    { timeout: 12000 }
   ).catch(() => null);
 
   await page.click('button[type="submit"]');
@@ -419,12 +508,7 @@ async function performAuroraLogin(
     logger.info(`[ERP Login] Auth API response status: ${status} for ${cleanUser}`);
 
     if (status === 200) {
-      logger.info(`[ERP Login] Auth API succeeded (HTTP 200) for ${cleanUser}! Waiting for session hydration...`);
-      await Promise.race([
-        page.waitForURL((url) => !url.href.includes('login'), { timeout: 8000 }).catch(() => {}),
-        page.waitForFunction(() => !!localStorage.getItem('erpUser'), { timeout: 8000 }).catch(() => {}),
-        page.waitForTimeout(2000),
-      ]);
+      logger.info(`[ERP Login] Auth API succeeded (HTTP 200) for ${cleanUser}! Session active.`);
       return true;
     }
 
@@ -522,13 +606,29 @@ async function scrapeAssignments(
 ): Promise<ERPAssignmentData[]> {
   const storedSession = parseStoredSession(connection.sessionCookies);
 
-  // ⚡ ULTRA-FAST PATH: Check direct student-portal API using stored session cookies first
+  // ⚡ ULTRA-FAST PATH 1: Check direct student-portal API using stored session cookies first
   // This completes in ~200-400ms without launching a Chromium browser instance!
   if (!explicitCreds && storedSession.cookies && storedSession.cookies.length > 0) {
     const direct = await fetchAssessmentsDirectApi(storedSession.cookies);
     if (direct && direct.length > 0) {
       return direct;
     }
+  }
+
+  // ⚡ ULTRA-FAST PATH 2: Check direct student-portal API using credentials
+  const credsToTry = explicitCreds || storedSession.credentials;
+  if (credsToTry && credsToTry.username && credsToTry.password) {
+    try {
+      const directLogin = await attemptDirectApiLogin(credsToTry.username, credsToTry.password);
+      if (directLogin && directLogin.cookies.length > 0) {
+        const direct = await fetchAssessmentsDirectApi(directLogin.cookies);
+        if (direct && direct.length > 0) {
+          logger.info(`[ERP Direct API] ⚡ Background sync retrieved ${direct.length} items via direct API!`);
+          await saveERPSession(connection.userId, connection.erpUrl, directLogin.cookies, credsToTry);
+          return direct;
+        }
+      }
+    } catch {}
   }
 
   let browser: Browser | null = null;
@@ -1244,6 +1344,71 @@ export async function authenticateAndSyncWithCredentials(
   erpUrl: string = env.AURORA_ERP_URL
 ): Promise<{ connectionId: string; assignments: any[]; assignmentCount: number }> {
   logger.info(`[ERP] Authenticating user ${userId} with ERP credentials (${username})...`);
+
+  // ⚡ STEP 1: Direct HTTP Auth API Fast-Path (completes in ~400ms without launching browser)
+  try {
+    const directAuth = await attemptDirectApiLogin(username, password);
+    if (directAuth && directAuth.cookies.length > 0) {
+      logger.info(`[ERP Direct Auth] ⚡ Direct API login succeeded for ${username}! Fetching assessments...`);
+      const directAssignments = await fetchAssessmentsDirectApi(directAuth.cookies);
+      if (directAssignments && directAssignments.length > 0) {
+        logger.info(`[ERP Direct Auth] ⚡ Direct API returned ${directAssignments.length} assignments in < 1s!`);
+        const connectionId = await saveERPSession(userId, erpUrl, directAuth.cookies, { username, password });
+
+        const formattedAssignments = directAssignments.map((a) => ({
+          id: a.erpId,
+          erpId: a.erpId,
+          title: a.title,
+          subject: a.subject,
+          description: a.description,
+          openingDate: a.openingDate ? a.openingDate.toISOString() : undefined,
+          closingDate: a.closingDate ? a.closingDate.toISOString() : undefined,
+          status: a.status,
+          maxMarks: a.maxMarks,
+          rawData: a.rawData,
+          isNew: false,
+          isNotified: false,
+          createdAt: new Date().toISOString(),
+          history: [],
+        }));
+
+        await valkeyCache.del(`valkey:erp:status:${userId}`).catch(() => {});
+        await valkeyCache.delPattern('valkey:erp:*').catch(() => {});
+        await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});
+        await valkeyCache.set(
+          `valkey:erp:assignments:${userId}:ALL:1:100:false`,
+          { assignments: formattedAssignments, total: formattedAssignments.length, page: 1, pageSize: 100 },
+          60
+        ).catch(() => {});
+
+        (async () => {
+          try {
+            await processAssignments(userId, connectionId, directAssignments);
+            await prisma.eRPConnection.update({
+              where: { id: connectionId },
+              data: { lastSyncStatus: 'SUCCESS', lastSyncAt: new Date(), lastSyncError: null },
+            });
+            await valkeyCache.del(`valkey:erp:status:${userId}`).catch(() => {});
+          } catch (err) {
+            logger.error('[ERP] Background persistence error:', err);
+          }
+        })();
+
+        return {
+          connectionId,
+          assignments: formattedAssignments,
+          assignmentCount: formattedAssignments.length,
+        };
+      }
+    }
+  } catch (directErr: any) {
+    if (directErr.message?.includes('Invalid ERP credentials')) {
+      throw directErr;
+    }
+    logger.info(`[ERP Direct Auth] Direct login fast-path bypassed: ${directErr.message}`);
+  }
+
+  // ⚡ STEP 2: Optimized Playwright browser fallback
   const browser = await chromium.launch({
     headless: true,
     args: [
@@ -1262,30 +1427,31 @@ export async function authenticateAndSyncWithCredentials(
 
     const page = await context.newPage();
 
-    // 1. Verify credentials via direct portal auth API in ~1.2s
+    // 1. Fast login via direct portal auth
     const portalBase = erpUrl ? new URL(erpUrl).origin : 'https://www.sidus.net';
     await performAuroraLogin(page, username, password, `${portalBase}/login`);
 
-    // 2. Navigate to assessments module for extraction
-    const targetAssessmentsUrl = erpUrl || 'https://www.sidus.net/modules/assessments/assessments';
-    logger.info(`[ERP] Navigating to assessments module (${targetAssessmentsUrl}) for ${username}...`);
-    await page.goto(targetAssessmentsUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 20000,
-    }).catch(() => {});
-
-    // 3. Extract assignments immediately from the active session in ~700ms
-    logger.info(`[ERP] Extracting assignments immediately for ${username}...`);
-    const rawAssignments = await extractAssignmentsFromPage(page);
-
-    // 4. Capture authenticated session cookies
+    // 2. Grab authenticated cookies immediately
     const cookies = await context.cookies();
+
+    // 3. Ultra-fast direct API check using browser-authenticated cookies (saves 20s of navigation & DOM scraping!)
+    let rawAssignments = await fetchAssessmentsDirectApi(cookies);
+
+    // 4. Fallback to DOM navigation only if direct API didn't return items
+    if (!rawAssignments || rawAssignments.length === 0) {
+      const targetAssessmentsUrl = erpUrl || 'https://www.sidus.net/modules/assessments/assessments';
+      logger.info(`[ERP] Navigating to assessments module (${targetAssessmentsUrl}) for ${username}...`);
+      await page.goto(targetAssessmentsUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000,
+      }).catch(() => {});
+      rawAssignments = await extractAssignmentsFromPage(page);
+    }
+
     const connectionId = await saveERPSession(userId, erpUrl, cookies, { username, password });
 
-    // Close verification browser immediately
     await browser.close();
 
-    // 4. Format assignments into client-ready ERPAssignment objects for immediate UI display
     const formattedAssignments = rawAssignments.map((a) => ({
       id: a.erpId,
       erpId: a.erpId,
@@ -1303,7 +1469,6 @@ export async function authenticateAndSyncWithCredentials(
       history: [],
     }));
 
-    // Invalidate Valkey cache on credential update and cache fresh assignments
     await valkeyCache.del(`valkey:erp:status:${userId}`).catch(() => {});
     await valkeyCache.delPattern('valkey:erp:*').catch(() => {});
     await valkeyCache.del(`valkey:stats:${userId}`).catch(() => {});

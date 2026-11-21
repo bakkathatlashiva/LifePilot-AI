@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../lib/api';
 import { format, isPast } from 'date-fns';
+import { safeFormatDate } from '../lib/date';
 import { Task } from '../types';
 import { colors } from '../theme/colors';
 import { AppHeader } from '../components/ui/AppHeader';
@@ -219,7 +220,7 @@ export function TasksScreen() {
                   ]}
                 >
                   {isOverdue ? '⚠️ ' : '📅 '}
-                  {format(new Date(task.deadline), 'MMM d, yyyy h:mm a')}
+                  {safeFormatDate(task.deadline, 'MMM d, yyyy h:mm a')}
                 </Text>
               ) : (
                 <Text style={styles.noDeadlineText}>No deadline set</Text>

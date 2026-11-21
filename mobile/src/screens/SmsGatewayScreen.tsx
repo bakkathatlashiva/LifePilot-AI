@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../lib/date';
 import { smsGatewayEngine, GatewayState } from '../services/smsGatewayService';
 import api from '../lib/api';
 import { colors } from '../theme/colors';
@@ -308,7 +309,7 @@ export function SmsGatewayScreen() {
                     </View>
                     <Text style={styles.jobMsg} numberOfLines={2}>{job.message}</Text>
                     <Text style={styles.jobTime}>
-                      {format(new Date(job.scheduledAt), 'MMM d, h:mm a')}
+                      {safeFormatDate(job.scheduledAt, 'MMM d, h:mm a')}
                     </Text>
                   </View>
                 );
