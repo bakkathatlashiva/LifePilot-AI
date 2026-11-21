@@ -545,6 +545,8 @@ function ERPInnerScreen() {
                 value={username}
                 onChangeText={setUsername}
                 placeholder="Enter Student ID / Roll Number or Email"
+                autoCapitalize="characters"
+                autoCorrect={false}
               />
 
               <Input

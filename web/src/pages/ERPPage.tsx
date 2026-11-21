@@ -596,6 +596,8 @@ function ERPSetupGuide({ onSuccess }: { onSuccess: (assignments?: ERPAssignment[
               value={username}
               onChange={e => setUsername(e.target.value)}
               placeholder="Enter Student ID / Roll Number or Email"
+              autoComplete="off"
+              autoCorrect="off"
               className="w-full bg-dark-800 border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-base sm:text-sm min-h-[44px] focus:outline-none focus:border-purple-500/60 font-mono"
             />
           </div>
